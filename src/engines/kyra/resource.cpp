@@ -26,6 +26,8 @@
 #include "common/config-manager.h"
 #include "common/fs.h"
 
+extern "C" void frank_quest_heap_walk(void);
+
 namespace Kyra {
 
 Resource::Resource(KyraEngine_v1 *vm) : _archiveCache(), _files(), _archiveFiles(), _protectedFiles(), _loaders(), _vm(vm) {
@@ -336,6 +338,10 @@ Common::Archive *Resource::loadArchive(const Common::String &name, Common::Archi
 			if ((*i)->isLoadable(name, *stream)) {
 				stream->seek(0, SEEK_SET);
 				printf("KYRA: loadArchive - loading...\n");
+				/* Snapshot heap state before the PAK parse so a corruption
+				 * triggered during load can be matched against the
+				 * pre-load chunk list. */
+				frank_quest_heap_walk();
 				archive = (*i)->load(member, *stream);
 				break;
 			} else {

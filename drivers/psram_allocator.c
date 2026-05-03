@@ -1,4 +1,12 @@
 /*
+ * FRANK Quest
+ *
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
  * psram_allocator.c — PSRAM heap backed by dlmalloc's mspace API.
  *
  * Ported from frank-msx / frank-blood. Earlier cabal revisions used a
@@ -52,6 +60,10 @@ extern void  *mspace_malloc  (mspace msp, size_t bytes);
 extern void  *mspace_realloc (mspace msp, void *ptr, size_t bytes);
 extern void   mspace_free    (mspace msp, void *ptr);
 extern size_t mspace_usable_size(const void *ptr);
+extern void   mspace_inspect_all(mspace msp,
+                                 void (*handler)(void *start, void *end,
+                                                 size_t used_bytes, void *arg),
+                                 void *arg);
 
 static mspace g_msp = NULL;
 
@@ -217,7 +229,7 @@ static void cabal_canary_report(const char *what, void *user,
                                 void *caller) {
     printf("\n*** PSRAM CANARY %s ***\n", what);
     printf("  user=%p hdr=%p\n", user, (void *)h);
-    printf("  caller=%p (run addr2line -e build/frank-cabal.elf -fCp <addr>)\n",
+    printf("  caller=%p (run addr2line -e build/frank-quest.elf -fCp <addr>)\n",
            caller);
     if (h) {
         printf("  hdr.magic=0x%08lx size=%lu\n",
@@ -452,24 +464,128 @@ void psram_print_status(void) {
 // past usable size of a chunk), not later when the free list has already
 // been scrambled and the next malloc crashes on a stale pointer.
 //
-// We print a loud marker, capture the caller PC/LR via __builtin_return_address,
-// then deliberately trap so the hardfault handler persists a dump across reboot.
+// We print a loud marker, dump the recent alloc/free ring and the walkable
+// portion of the heap, then trap into HardFault with a deterministic UDF so
+// the reset handler can persist context.
 
-static void cabal_heap_trap(const char *kind, void *m, const void *p) {
-    void *caller0 = __builtin_return_address(0);
-    void *caller1 = __builtin_return_address(1);
+/* Heap walker used by the corruption dump and by frank_quest_heap_walk().
+ * Prints each chunk dlmalloc will visit up to `limit_used_bytes` — once we
+ * cross a corrupted footer mspace_inspect_all() itself can loop forever,
+ * so bound the walk. */
+typedef struct {
+    uint32_t count;
+    uint32_t free_count;
+    size_t   used_total;
+    size_t   free_total;
+    size_t   biggest_free;
+    uint32_t limit;
+} heap_walk_ctx_t;
+
+static void heap_walk_cb(void *start, void *end, size_t used, void *arg) {
+    heap_walk_ctx_t *c = (heap_walk_ctx_t *)arg;
+    if (c->count >= c->limit) return;
+    size_t total = (size_t)((uint8_t *)end - (uint8_t *)start);
+    size_t freeb = total > used ? total - used : 0;
+    if (used) {
+        c->used_total += used;
+    } else {
+        c->free_count++;
+        c->free_total += freeb;
+        if (freeb > c->biggest_free) c->biggest_free = freeb;
+    }
+    /* Print first N chunks to keep log manageable. */
+    if (c->count < 32) {
+        printf("    [%3u] %p..%p total=%-8u used=%-8u  %s\n",
+               (unsigned)c->count, start, end,
+               (unsigned)total, (unsigned)used,
+               used ? "USED" : "free");
+    } else if (c->count == 32) {
+        printf("    ... (further chunks suppressed) ...\n");
+    }
+    c->count++;
+}
+
+static void heap_walk_and_dump(uint32_t limit) {
+    if (!g_msp) {
+        printf("  [heap walk: mspace not initialized]\n");
+        return;
+    }
+    heap_walk_ctx_t c = { 0 };
+    c.limit = limit;
+    printf("  --- heap walk (first %u chunks, bounded at %u) ---\n",
+           (unsigned)(limit > 32 ? 32 : limit), (unsigned)limit);
+    mspace_inspect_all(g_msp, heap_walk_cb, &c);
+    printf("  heap: chunks=%u used=%u free_chunks=%u free_total=%u biggest_free=%u\n",
+           (unsigned)c.count, (unsigned)c.used_total,
+           (unsigned)c.free_count, (unsigned)c.free_total,
+           (unsigned)c.biggest_free);
+}
+
+/* Public: walk the heap on demand — safe to call when audio/HDMI IRQs
+ * are running because we take MSPACE_LOCK to keep dlmalloc quiescent. */
+void frank_quest_heap_walk(void) {
+    if (!psram_ready || !g_msp) {
+        printf("frank_quest_heap_walk: heap not ready\n");
+        return;
+    }
+    MSPACE_LOCK();
+    heap_walk_and_dump(1024);
+    MSPACE_UNLOCK();
+}
+
+/* dlmalloc calls the error hooks via an `fm->magic = 0; ACTION(fm)` macro
+ * expansion, so `__builtin_return_address(0)` inside a nested helper returns
+ * a PC inside our own trap routine — useless. Instead, capture the caller
+ * PC directly at the hook entry and pass it through. Marked noinline so the
+ * address captured here is the one dlmalloc itself returned into.
+ *
+ * Re-entry guard: if the heap walk below trips another footer check, we'd
+ * recurse into this function forever. Skip the walk on re-entry. */
+static volatile int g_in_heap_trap = 0;
+
+static __attribute__((noinline))
+void cabal_heap_trap(const char *kind, void *m, const void *p, void *caller) {
+    int first_entry = (g_in_heap_trap == 0);
+    g_in_heap_trap = 1;
+
     printf("\n*** PSRAM HEAP %s ***\n", kind);
     printf("  mstate=%p chunk=%p\n", m, p);
-    printf("  caller[0]=%p caller[1]=%p\n", caller0, caller1);
-    // Bus-fault-y pointer deref so the hardfault handler captures context.
-    *(volatile uint32_t *)0x00000000 = 0xDEADBEEF;
+    printf("  caller=%p (run: arm-none-eabi-addr2line -e build/frank-quest.elf -fCp %p)\n",
+           caller, caller);
+
+    if (first_entry) {
+        /* Print ring of recent alloc/free events — the last entry is almost
+         * always the allocation that triggered the footer check. */
+        printf("  --- last 32 alloc/free events (most recent first) ---\n");
+        alloc_log_dump_tail(32);
+        printf("  --- end log ---\n");
+
+        /* Walk the heap. This is best-effort: once dlmalloc's invariants
+         * are broken the walker may abort early, but the chunks printed
+         * BEFORE it gives up tend to identify the scribbled-over block. */
+        heap_walk_and_dump(1024);
+    } else {
+        printf("  [re-entry — skipping heap walk and log dump]\n");
+    }
+
+    fflush(stdout);
+
+    /* Kill interrupts so no IRQ can mutate state before the trap. */
+    (void)save_and_disable_interrupts();
+
+    /* UDF #0 → HardFault. Deterministic on Cortex-M33, unlike writing to
+     * NULL (which on RP2350 hits the flash XIP vector table and is
+     * silently absorbed on writes). */
+    __builtin_trap();
     for (;;) { }
 }
 
 void cabal_heap_error(void *m, void *p) {
-    cabal_heap_trap("USAGE ERROR (bad free / double free / bad ptr)", m, p);
+    cabal_heap_trap("USAGE ERROR (bad free / double free / bad ptr)",
+                    m, p, __builtin_return_address(0));
 }
 
 void cabal_heap_corruption(void *m) {
-    cabal_heap_trap("CORRUPTION (footer magic failed)", m, NULL);
+    cabal_heap_trap("CORRUPTION (footer magic failed)",
+                    m, NULL, __builtin_return_address(0));
 }
