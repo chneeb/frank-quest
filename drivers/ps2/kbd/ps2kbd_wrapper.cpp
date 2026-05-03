@@ -10,16 +10,46 @@
 
 #include "board_config.h"
 #include "ps2kbd_wrapper.h"
+#include <new>  // for placement new in ps2kbd_init
 #include "ps2kbd_mrmltr.h"
-#include <queue>
 
 struct KeyEvent {
     int pressed;
     unsigned char key;
-    uint8_t hid_code;  // Raw HID code for display
+    uint8_t hid_code;
 };
 
-static std::queue<KeyEvent> event_queue;
+// Fixed-size ring buffer in SRAM. std::queue's backing deque lives on
+// the PSRAM-backed operator-new heap, which gets wiped when
+// cabal_main() tears down an engine and loops back to the selector;
+// the queue's internal node pointers would then dangle. A plain
+// circular buffer keeps everything in BSS and survives psram_reset().
+static constexpr int EVENT_QUEUE_SIZE = 64;
+static KeyEvent event_ring[EVENT_QUEUE_SIZE];
+static volatile int event_ring_head = 0;  // producer
+static volatile int event_ring_tail = 0;  // consumer
+
+static inline bool event_queue_empty() {
+    return event_ring_head == event_ring_tail;
+}
+
+static inline void event_queue_push(const KeyEvent &e) {
+    const int next = (event_ring_head + 1) % EVENT_QUEUE_SIZE;
+    if (next == event_ring_tail) {
+        // Queue full — drop the oldest event by advancing tail. Input
+        // is better stale than wedged.
+        event_ring_tail = (event_ring_tail + 1) % EVENT_QUEUE_SIZE;
+    }
+    event_ring[event_ring_head] = e;
+    event_ring_head = next;
+}
+
+static inline bool event_queue_pop(KeyEvent &e) {
+    if (event_queue_empty()) return false;
+    e = event_ring[event_ring_tail];
+    event_ring_tail = (event_ring_tail + 1) % EVENT_QUEUE_SIZE;
+    return true;
+}
 
 // HID to ASCII mapping
 static unsigned char hid_to_ascii(uint8_t code, bool shift) {
@@ -95,15 +125,15 @@ static void key_handler(hid_keyboard_report_t *curr, hid_keyboard_report_t *prev
         // Report modifier changes
         if (changed_mods & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT)) {
             int pressed = (curr->modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT)) != 0;
-            event_queue.push({pressed, 0xE1, 0xE1});  // Shift
+            event_queue_push({pressed, 0xE1, 0xE1});  // Shift
         }
         if (changed_mods & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) {
             int pressed = (curr->modifier & (KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_RIGHTCTRL)) != 0;
-            event_queue.push({pressed, 0xE0, 0xE0});  // Ctrl
+            event_queue_push({pressed, 0xE0, 0xE0});  // Ctrl
         }
         if (changed_mods & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT)) {
             int pressed = (curr->modifier & (KEYBOARD_MODIFIER_LEFTALT | KEYBOARD_MODIFIER_RIGHTALT)) != 0;
-            event_queue.push({pressed, 0xE2, 0xE2});  // Alt
+            event_queue_push({pressed, 0xE2, 0xE2});  // Alt
         }
     }
 
@@ -119,7 +149,7 @@ static void key_handler(hid_keyboard_report_t *curr, hid_keyboard_report_t *prev
             }
             if (!found) {
                 unsigned char ascii = hid_to_ascii(curr->keycode[i], shift_held);
-                event_queue.push({1, ascii, curr->keycode[i]});
+                event_queue_push({1, ascii, curr->keycode[i]});
             }
         }
     }
@@ -136,17 +166,23 @@ static void key_handler(hid_keyboard_report_t *curr, hid_keyboard_report_t *prev
             }
             if (!found) {
                 unsigned char ascii = hid_to_ascii(prev->keycode[i], shift_held);
-                event_queue.push({0, ascii, prev->keycode[i]});
+                event_queue_push({0, ascii, prev->keycode[i]});
             }
         }
     }
 }
 
+// The Ps2Kbd_Mrmltr object must survive a return-to-selector teardown
+// that wipes the PSRAM heap (operator new routes there). Park it in an
+// SRAM buffer and placement-new into it once at cold boot; subsequent
+// calls are a no-op so stale PIO state-machine claims aren't leaked.
 static Ps2Kbd_Mrmltr* kbd = nullptr;
+alignas(Ps2Kbd_Mrmltr) static uint8_t kbd_storage[sizeof(Ps2Kbd_Mrmltr)];
 
 extern "C" void ps2kbd_init(void) {
+    if (kbd) return;  // already initialized — PIO SM and program are retained
     // PS2 keyboard driver expects base_gpio as CLK, and base_gpio+1 as DATA
-    kbd = new Ps2Kbd_Mrmltr(pio0, PS2_PIN_CLK, key_handler);
+    kbd = new (kbd_storage) Ps2Kbd_Mrmltr(pio0, PS2_PIN_CLK, key_handler);
     kbd->init_gpio();
 }
 
@@ -154,19 +190,24 @@ extern "C" void ps2kbd_tick(void) {
     if (kbd) kbd->tick();
 }
 
+// Drop any pending input events. Called on game-to-selector transitions
+// so a held-Del from Ctrl+Alt+Del doesn't "leak" into the selector.
+extern "C" void ps2kbd_flush(void) {
+    event_ring_head = 0;
+    event_ring_tail = 0;
+}
+
 extern "C" int ps2kbd_get_key(int* pressed, unsigned char* key) {
-    if (event_queue.empty()) return 0;
-    KeyEvent e = event_queue.front();
-    event_queue.pop();
+    KeyEvent e;
+    if (!event_queue_pop(e)) return 0;
     *pressed = e.pressed;
     *key = e.key;
     return 1;
 }
 
 extern "C" int ps2kbd_get_key_ext(int* pressed, unsigned char* key, uint8_t* hid_code) {
-    if (event_queue.empty()) return 0;
-    KeyEvent e = event_queue.front();
-    event_queue.pop();
+    KeyEvent e;
+    if (!event_queue_pop(e)) return 0;
     *pressed = e.pressed;
     *key = e.key;
     *hid_code = e.hid_code;

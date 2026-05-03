@@ -16,8 +16,10 @@
 #include "frank_quest_fs.h"
 #include "frank_quest_selector.h"
 
-#include "hardware/watchdog.h"
-#include "hardware/structs/watchdog.h"
+extern "C" {
+#include "psram_allocator.h"
+}
+
 #include "common/system.h"
 #include "common/config-manager.h"
 #include "graphics/surface.h"
@@ -997,6 +999,41 @@ static bool launchScummGame(const char *gamePath) {
     return (err.getCode() == Common::kNoError);
 }
 
+// Minimum ConfMan defaults every engine expects to exist. The
+// per-launcher functions below override some of these, but the
+// EVENT_QUIT handler in backends/events/default-events.cpp reads
+// keys (like confirm_exit) whose absence triggers an I_Error panic
+// — so any key the engine loop itself consumes has to be set here
+// regardless of which launcher runs next.
+static void registerConfManDefaults() {
+    ConfMan.registerDefault("confirm_exit",                    false);
+    ConfMan.registerDefault("autosave_period",                 0);
+    ConfMan.registerDefault("enable_unsupported_game_warning", false);
+    ConfMan.registerDefault("mute",                            false);
+    ConfMan.registerDefault("music_mute",                      false);
+    ConfMan.registerDefault("sfx_mute",                        false);
+    ConfMan.registerDefault("speech_mute",                     false);
+    ConfMan.registerDefault("music_volume",                    192);
+    ConfMan.registerDefault("sfx_volume",                      192);
+    ConfMan.registerDefault("speech_volume",                   192);
+    ConfMan.registerDefault("subtitles",                       true);
+    ConfMan.registerDefault("talkspeed",                       60);
+    ConfMan.registerDefault("midi_gain",                       100);
+    ConfMan.registerDefault("native_mt32",                     false);
+    ConfMan.registerDefault("enable_gs",                       false);
+    ConfMan.registerDefault("multi_midi",                      false);
+    ConfMan.registerDefault("aspect_ratio",                    false);
+    ConfMan.registerDefault("fullscreen",                      false);
+    ConfMan.registerDefault("filtering",                       false);
+    ConfMan.registerDefault("copy_protection",                 false);
+    ConfMan.registerDefault("music_driver",                    "adlib");
+    ConfMan.registerDefault("gm_device",                       "null");
+    ConfMan.registerDefault("mt32_device",                     "null");
+    ConfMan.registerDefault("language",                        "en");
+    ConfMan.registerDefault("gfx_mode",                        "normal");
+    ConfMan.registerDefault("render_mode",                     "");
+}
+
 // Dispatch a QuestGame to the engine launcher it belongs to. Returns
 // true if the engine reported success; false means the engine refused
 // to start (bad files, unsupported variant, etc.).
@@ -1019,66 +1056,175 @@ static bool dispatchGame(const QuestGame &g) {
     return false;
 }
 
-// Pull the last-selected cursor index out of watchdog scratch so a
-// Ctrl+Alt+Del reboot returns to the same list position. The scratch
-// pair has a magic cookie to distinguish a cold boot from a warm one
-// the selector initiated.
-static int restoreSelectorIndex() {
-    if (watchdog_hw->scratch[FRANK_QUEST_SCRATCH_MAGIC_SLOT] !=
-        FRANK_QUEST_SCRATCH_MAGIC) {
-        return 0;
-    }
-    int idx = (int)watchdog_hw->scratch[FRANK_QUEST_SCRATCH_INDEX_SLOT];
-    // Clear magic so subsequent cold boots don't see stale data.
-    watchdog_hw->scratch[FRANK_QUEST_SCRATCH_MAGIC_SLOT] = 0;
-    if (idx < 0) idx = 0;
-    return idx;
+// Last-selected cursor index across selector re-entries. No reboot
+// happens between selector iterations (in-process teardown), so this
+// stays a plain global — scratch-register persistence is not needed.
+static int g_lastSelectorIndex = 0;
+
+// External flag from rp2350-minimal.cpp — cleared on session boundaries
+// so a stale CAD press (modifier still held in the state machine)
+// doesn't fire immediately after reinit.
+extern "C" void frank_quest_cad_clear(void);
+
+// PS/2 input ring buffer flush.
+extern "C" void ps2kbd_flush(void);
+
+// ScummVM singleton teardown. Mirrors the destroy sequence at the end
+// of scummvm_main() in src/base/main.cpp so we leave the engine state
+// in the same shape a fresh boot would.
+#include "base/plugins.h"
+#include "common/debug-channels.h"
+#include "common/memorypool.h"
+#include "audio/musicplugin.h"
+#include "audio/audiodev/pcspk.h"
+#include "graphics/cursorman.h"
+#include "graphics/yuv_to_rgb.h"
+#include "backends/fs/rp2350/rp2350-fs-factory.h"
+
+// Common::String's refcount memory pool is a file-static global in
+// src/common/str.cpp that's heap-allocated on first use and never
+// freed (the file's own comment flags this: "FIXME: This is never
+// freed right now"). The pool lives in the PSRAM mspace we wipe on
+// each return-to-selector, so the dangling pointer segfaults inside
+// allocChunk() the next time a String is constructed. Reach into the
+// global and reset it before psram_reset() nukes its backing memory.
+namespace Common {
+extern MemoryPool *g_refCountPool;
 }
 
-static void persistSelectorIndex(int idx) {
-    watchdog_hw->scratch[FRANK_QUEST_SCRATCH_MAGIC_SLOT] = FRANK_QUEST_SCRATCH_MAGIC;
-    watchdog_hw->scratch[FRANK_QUEST_SCRATCH_INDEX_SLOT] = (uint32_t)idx;
+static void teardownSingletons() {
+    if (g_system) {
+        g_system->getEventManager()->resetRTL();
+    }
+
+    PluginManager::instance().unloadAllPlugins();
+    PluginManager::destroy();
+    Common::ConfigManager::destroy();
+    Common::DebugManager::destroy();
+    Common::SearchManager::destroy();
+    MusicManager::destroy();
+    EngineManager::destroy();
+
+    // Reset graphics/audio helper singletons that lazy-allocate into
+    // PSRAM. Skipping any of these leaves the template's static
+    // _singleton pointer dangling after psram_reset() and the next
+    // game's first instance() silently returns freed memory.
+    // FontManager and CoroutineScheduler have no DECLARE_SINGLETON in
+    // this build's link closure, so they don't need teardown here.
+    Graphics::CursorManager::destroy();
+    Graphics::YUVToRGBManager::destroy();
+    Audio::PCSpeakerFactoryManager::destroy();
+#ifdef USE_TRANSLATION
+    Common::TranslationManager::destroy();
+#endif
 }
 
 // Main game loop - called from main.c
 extern "C" int cabal_main(void) {
     printf("FRANK Quest: Starting with OSystem backend...\n");
 
-    // Scan /quest on SD card for games.
-    static QuestGame games[64];
-    int count = frank_quest_scan_games(games, 64);
-    printf("FRANK Quest: %d game(s) detected under /quest\n", count);
+    // Seed ConfMan so the engine's default event loop finds every
+    // key it reads unconditionally (confirm_exit etc.). Must be
+    // re-registered on every selector iteration because ConfMan is
+    // torn down along with the other singletons below.
+    registerConfManDefaults();
 
-    int initialIndex = restoreSelectorIndex();
-    int selected = frank_quest_run_selector(games, count, initialIndex);
+    // Outer loop: selector → game → teardown → back to selector.
+    // HDMI stays locked across the loop because the framebuffer lives
+    // in a persistent PSRAM slot (psram_get_framebuffer) that isn't
+    // touched by psram_reset(), and we never reinitialize the HDMI
+    // hardware — only OSystem + singletons + mspace get rebuilt.
+    while (true) {
+        // Scan /quest on SD card for games. Lives in static storage
+        // so it doesn't burn mspace — scan happens before the first
+        // engine alloc and wouldn't survive the reset anyway.
+        static QuestGame games[64];
+        int count = frank_quest_scan_games(games, 64);
+        printf("FRANK Quest: %d game(s) detected under /quest\n", count);
 
-    if (selected < 0 || selected >= count) {
-        // No game — sit on the selector screen. The user still has
-        // Ctrl+Alt+Del to reboot.
-        printf("FRANK Quest: no game selected; idling.\n");
-        while (true) g_system->delayMillis(100);
+        int selected = frank_quest_run_selector(games, count,
+                                                g_lastSelectorIndex);
+
+        if (selected < 0 || selected >= count) {
+            printf("FRANK Quest: no game selected; idling.\n");
+            while (true) g_system->delayMillis(100);
+        }
+
+        g_lastSelectorIndex = selected;
+
+        const QuestGame &g = games[selected];
+        printf("FRANK Quest: launching %s (engine=%d path=%s)\n",
+               g.displayName, (int)g.engine, g.dirPath);
+
+        if (dispatchGame(g)) {
+            printf("FRANK Quest: game completed cleanly.\n");
+        } else {
+            printf("FRANK Quest: game dispatch failed.\n");
+        }
+
+        // Engine has returned — either naturally (ChainGamesMan empty,
+        // game finished) or via Ctrl+Alt+Del → EVENT_QUIT. Tear down
+        // every bit of state it touched: singletons first, then the
+        // OSystem, then the entire PSRAM mspace. HDMI scanout stays
+        // pointed at the persistent framebuffer slot throughout.
+        printf("FRANK Quest: tearing down engine state...\n");
+        teardownSingletons();
+
+        // OSystem's destructor is protected, but we own the concrete
+        // OSystem_RP2350 subtype and its destructor is public. Cast
+        // down before deleting.
+        delete static_cast<OSystem_RP2350 *>(g_system);
+        g_system = nullptr;
+
+        // Null stale global pointers that reference mspace memory
+        // ABOUT to be freed. The String refcount pool is allocated
+        // lazily by Common::String and never released; the global
+        // pointer in str.cpp would dangle after psram_reset() and
+        // crash on the next String construction. A fresh pool is
+        // allocated on demand the next time a String is built.
+        Common::g_refCountPool = nullptr;
+
+        // Same fix for every Common::Singleton<T> we touch. The
+        // template's static _singleton pointer lives in BSS and
+        // caches a heap-allocated instance (makeInstance() does
+        // `new T()` which routes to PSRAM). Leave it pointing into
+        // the about-to-be-wiped mspace and the next instance() call
+        // silently reads garbage through the stale vtable — that's
+        // why FSNode::exists() returned false on the second engine
+        // launch without crashing: the factory-object memory had
+        // been partially reused and makeFileNodePath() dispatched
+        // into nonsense. destroy() runs the destructor and nulls
+        // the static for us.
+        RP2350FilesystemFactory::destroy();
+
+        // Wipe the mspace — every engine allocation is freed in one
+        // step. The framebuffer sits outside the mspace so HDMI keeps
+        // displaying the last rendered frame during this wipe.
+        psram_reset();
+
+        // Close any SD file/dir handles left dangling by the engine
+        // (graceful exit paths close them, but CAD is a cold cut).
+        cabal_fs_session_reset();
+
+        // Clear the CAD modifier state machine so a residual "Ctrl
+        // still held" from the trigger event doesn't immediately
+        // refire the next time a modifier is pressed.
+        frank_quest_cad_clear();
+
+        // Drop any in-flight PS/2 keyboard events — the ring buffer
+        // itself lives in SRAM (survives psram_reset) but may hold
+        // events produced during the engine's own teardown that the
+        // selector shouldn't see (e.g. the Del keyup from CAD).
+        ps2kbd_flush();
+
+        // Rebuild OSystem for the next iteration of the selector.
+        // cabal_init() is idempotent — cabal_fs stays mounted, the
+        // HDMI buffer pointer is unchanged — so we just re-create
+        // the ScummVM backend.
+        cabal_init();
+
+        // ConfMan was just destroyed; seed it again with the keys
+        // the engine's EVENT_QUIT handler expects to find.
+        registerConfManDefaults();
     }
-
-    // Persist the selected index so Ctrl+Alt+Del during the game comes
-    // back to the same cursor position.
-    persistSelectorIndex(selected);
-
-    const QuestGame &g = games[selected];
-    printf("FRANK Quest: launching %s (engine=%d path=%s)\n",
-           g.displayName, (int)g.engine, g.dirPath);
-
-    if (dispatchGame(g)) {
-        printf("FRANK Quest: game completed cleanly.\n");
-    } else {
-        printf("FRANK Quest: game dispatch failed.\n");
-    }
-
-    // Always return to selector on engine exit via a warm reboot. The
-    // engines hold ~5 MB of PSRAM allocations with no tidy teardown
-    // path, so a clean heap is much safer than trying to unwind.
-    printf("FRANK Quest: rebooting to selector...\n");
-    watchdog_reboot(0, 0, 10);
-    while (true) tight_loop_contents();
-
-    return 0;
 }

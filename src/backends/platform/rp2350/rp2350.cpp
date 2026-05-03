@@ -65,10 +65,14 @@ RP2350GraphicsManager::RP2350GraphicsManager() :
     memset(_palette, 0, sizeof(_palette));
     memset(_cursorPalette, 0, sizeof(_cursorPalette));
 
-    // Allocate framebuffer from PSRAM
-    _framebuffer = (uint8_t *)psram_malloc(320 * 240);
+    // Use the persistent HDMI framebuffer slot rather than mspace.
+    // This survives psram_reset() so HDMI keeps scanning out valid
+    // pixels while the heap is wiped for a return-to-selector
+    // transition. Don't clear it on construction — on a warm restart
+    // we want the last rendered frame to stay on screen until the
+    // selector paints over it.
+    _framebuffer = (uint8_t *)psram_get_framebuffer();
     if (_framebuffer) {
-        memset(_framebuffer, 0, 320 * 240);
         graphics_set_buffer(_framebuffer);
     }
 }

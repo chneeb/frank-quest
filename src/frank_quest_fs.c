@@ -115,6 +115,26 @@ uint32_t cabal_fs_free_space(void) {
     return free_clusters * fs->csize * 512;
 }
 
+void cabal_fs_session_reset(void) {
+    if (!g_initialized) return;
+    // Close any file handles the previous session forgot to release,
+    // then zero the pools. SD card stays mounted (no f_mount() bounce)
+    // because the filesystem state in g_fatfs is independent of the
+    // handle pools.
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (g_files[i].valid) {
+            f_close(&g_files[i].fil);
+        }
+    }
+    for (int i = 0; i < MAX_OPEN_DIRS; i++) {
+        if (g_dirs[i].valid) {
+            f_closedir(&g_dirs[i].dir);
+        }
+    }
+    memset(g_files, 0, sizeof(g_files));
+    memset(g_dirs, 0, sizeof(g_dirs));
+}
+
 //============================================================================
 // File Operations
 //============================================================================

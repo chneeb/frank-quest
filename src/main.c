@@ -17,7 +17,6 @@
 #include "hardware/clocks.h"
 #include "hardware/vreg.h"
 #include "hardware/flash.h"
-
 #include "board_config.h"
 #include "psram_init.h"
 #include "psram_allocator.h"
@@ -130,7 +129,8 @@ int main(void) {
     printf("System clock: %lu Hz\n", clock_get_hz(clk_sys));
     printf("\n");
 
-    // Startup delay for USB serial console
+    // Startup delay for USB serial console (cold boot only; return-
+    // to-selector stays in-process so there's no warm boot path).
     printf("Starting in ");
     for (int i = 5; i > 0; i--) {
         printf("%d...", i);
@@ -155,20 +155,20 @@ int main(void) {
     cabal_enable_psram_heap(); // Enable PSRAM for malloc/new heap
     printf("  PSRAM: 8MB at 0x11000000\n");
 
-    // Initialize framebuffers from PSRAM
-    printf("Initializing framebuffers...\n");
-    framebuffer_0 = (uint8_t *)psram_malloc(CABAL_FRAMEBUFFER_SIZE);
-    framebuffer_1 = (uint8_t *)psram_malloc(CABAL_FRAMEBUFFER_SIZE);
-    if (!framebuffer_0 || !framebuffer_1) {
-        printf("ERROR: Failed to allocate framebuffers!\n");
-        while (1) tight_loop_contents();
-    }
+    // Use the persistent HDMI framebuffer slot, not an mspace alloc.
+    // Single buffer — the double-buffering paths (cabal_swap_buffers,
+    // cabal_get_back_buffer) are legacy stubs nothing in the ScummVM
+    // backend currently calls; OSystem_RP2350 writes directly to the
+    // one HDMI buffer each updateScreen(). A single fixed buffer
+    // lets HDMI keep scanning it during a return-to-selector wipe.
+    printf("Initializing framebuffer...\n");
+    framebuffer_0 = (uint8_t *)psram_get_framebuffer();
+    framebuffer_1 = framebuffer_0;
     memset(framebuffer_0, 0, CABAL_FRAMEBUFFER_SIZE);
-    memset(framebuffer_1, 0, CABAL_FRAMEBUFFER_SIZE);
     current_framebuffer = framebuffer_0;
     current_buffer_index = 0;
-    printf("  FB0: %p (%d bytes)\n", framebuffer_0, CABAL_FRAMEBUFFER_SIZE);
-    printf("  FB1: %p (%d bytes)\n", framebuffer_1, CABAL_FRAMEBUFFER_SIZE);
+    printf("  FB: %p (%d bytes, persistent)\n",
+           framebuffer_0, CABAL_FRAMEBUFFER_SIZE);
 
     // Initialize HDMI
     printf("Initializing HDMI...\n");

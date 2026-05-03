@@ -61,6 +61,18 @@ OSystem_RP2350::OSystem_RP2350()
 }
 
 OSystem_RP2350::~OSystem_RP2350() {
+	// Order is load-bearing.
+	//
+	// 1. Silence the audio path first. The I2S DMA IRQ calls
+	//    mixer_callback_wrapper which dereferences g_mixer; if we
+	//    delete _mixer while the IRQ is still armed the next DMA
+	//    completion dives through a freed vtable and hard-faults.
+#ifdef USE_I2S_AUDIO
+	cabal_audio_set_mixer_callback(NULL);
+	cabal_audio_shutdown();
+#endif
+	g_mixer = nullptr;
+
 	if (_cursor.data) {
 		delete[] _cursor.data;
 	}
@@ -69,6 +81,38 @@ OSystem_RP2350::~OSystem_RP2350() {
 	}
 	_screen.reset();
 	_overlay.reset();
+
+	// 2. Destroy OSystem subsystems that need our virtual mutex
+	//    methods BEFORE the base-class destructor runs. Once ~OSystem
+	//    starts, the vtable reverts to OSystem's and the pure-virtual
+	//    lockMutex/unlockMutex stubs are reached through g_system,
+	//    which crashes at PC=0.
+	//
+	//    DefaultTimerManager::~DefaultTimerManager takes a StackLock
+	//    on its own mutex → calls g_system->lockMutex(). Similarly
+	//    DefaultEventManager's timer callback path. Tear them down
+	//    here while our vtable is still active, then null them so
+	//    ~OSystem's own `delete _timerManager` is a no-op.
+	delete _timerManager;
+	_timerManager = nullptr;
+
+	delete _eventManager;
+	_eventManager = nullptr;
+
+	delete _savefileManager;
+	_savefileManager = nullptr;
+
+	delete _audiocdManager;
+	_audiocdManager = nullptr;
+
+	// 3. _fsFactory points at the RP2350FilesystemFactory singleton
+	//    (&RP2350FilesystemFactory::instance()), not an owned
+	//    heap object. Letting ~OSystem run `delete _fsFactory` would
+	//    free the singleton storage and leave Singleton<>::_singleton
+	//    pointing at freed memory; the next call to instance() then
+	//    dereferences garbage and hardfaults. Null it here so the
+	//    base destructor's delete is a no-op on nullptr.
+	_fsFactory = nullptr;
 }
 
 void OSystem_RP2350::initBackend() {
@@ -391,7 +435,18 @@ void OSystem_RP2350::getTimeAndDate(TimeDate &t) const {
 	t.tm_wday = 0;
 }
 
+extern "C" int frank_quest_cad_consume(void);
+
 bool OSystem_RP2350::pollEvent(Common::Event &event) {
+	// Ctrl+Alt+Del — translate into a Common::EVENT_QUIT so ScummVM
+	// engines exit run() cleanly and cabal_main() returns to the
+	// selector. Consumed here before any real input so we can't lose
+	// the signal to a busy input queue.
+	if (frank_quest_cad_consume()) {
+		event.type = Common::EVENT_QUIT;
+		return true;
+	}
+
 	CabalEvent cabalEvent;
 	if (!cabal_poll_event(&cabalEvent)) {
 		return false;

@@ -124,13 +124,26 @@ void i2s_init(i2s_config_t *config) {
     gpio_set_drive_strength(config->clock_pin_base, GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_drive_strength(config->clock_pin_base + 1, GPIO_DRIVE_STRENGTH_12MA);
 
-    // Claim state machine
-    audio_sm = pio_claim_unused_sm(audio_pio, true);
+    // Claim state machine and load the PIO program — but only once per
+    // cold boot. cabal_audio_shutdown() stops the SM and releases DMA
+    // channels, but leaves the SM claim and program in place because
+    // PIO program memory (32 instructions per PIO block) and SM count
+    // (4 per PIO) are too scarce to re-use across return-to-selector
+    // cycles; a naive re-claim leaks an SM each iteration until
+    // pio_claim_unused_sm panics.
+    static int  audio_sm_cached     = -1;
+    static uint audio_offset_cached = 0;
+    static bool audio_pio_set_up    = false;
+    if (!audio_pio_set_up) {
+        audio_sm_cached     = pio_claim_unused_sm(audio_pio, true);
+        audio_offset_cached = pio_add_program(audio_pio, &audio_i2s_program);
+        audio_pio_set_up    = true;
+    }
+    audio_sm   = audio_sm_cached;
     config->sm = audio_sm;
-    printf("Audio: Using PIO0 SM%d\n", audio_sm);
+    printf("Audio: Using PIO0 SM%d (cached)\n", audio_sm);
 
-    // Add PIO program
-    uint offset = pio_add_program(audio_pio, &audio_i2s_program);
+    uint offset = audio_offset_cached;
     audio_i2s_program_init(audio_pio, audio_sm, offset,
                            config->data_pin, config->clock_pin_base);
 

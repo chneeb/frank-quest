@@ -57,6 +57,11 @@ bool cabal_fs_ready(void);
 // Get free space in bytes
 uint32_t cabal_fs_free_space(void);
 
+// Reset per-session state — close any open files left dangling by a
+// game that exited ungracefully (e.g. via Ctrl+Alt+Del). The SD card
+// stays mounted; only the open-handle pools are wiped.
+void cabal_fs_session_reset(void);
+
 //============================================================================
 // File Operations
 //============================================================================

@@ -277,29 +277,23 @@ void cabal_init_graphics(int width, int height) {
     g_state.screenWidth = width;
     g_state.screenHeight = height;
 
-    // Allocate screen surface from PSRAM
+    // Screen and overlay surfaces live in the PSRAM mspace. On a
+    // return-to-selector teardown psram_reset() wipes the mspace, so
+    // any surviving g_state.screen.pixels / overlay.pixels pointers
+    // are dangling. Null them out before reallocating so we never
+    // hand an engine back a pointer into freed storage.
+    g_state.screen.pixels = (uint8_t *)psram_malloc(width * height);
     if (g_state.screen.pixels) {
-        // Already allocated - just clear
         memset(g_state.screen.pixels, 0, width * height);
-    } else {
-        g_state.screen.pixels = (uint8_t *)psram_malloc(width * height);
-        if (g_state.screen.pixels) {
-            memset(g_state.screen.pixels, 0, width * height);
-        }
     }
     g_state.screen.width = width;
     g_state.screen.height = height;
     g_state.screen.pitch = width;
     g_state.screen.bytesPerPixel = 1;
 
-    // Allocate overlay surface from PSRAM
+    g_state.overlay.pixels = (uint8_t *)psram_malloc(width * height);
     if (g_state.overlay.pixels) {
         memset(g_state.overlay.pixels, 0, width * height);
-    } else {
-        g_state.overlay.pixels = (uint8_t *)psram_malloc(width * height);
-        if (g_state.overlay.pixels) {
-            memset(g_state.overlay.pixels, 0, width * height);
-        }
     }
     g_state.overlay.width = width;
     g_state.overlay.height = height;
@@ -514,24 +508,24 @@ void cabal_set_mouse_cursor(const uint8_t *data, int w, int h,
 // Events
 //============================================================================
 
-// ---- Ctrl+Alt+Del watchdog reboot -------------------------------------
+// ---- Ctrl+Alt+Del → cooperative quit -----------------------------------
 //
 // Detected at the lowest event layer so it works even if the active
 // engine doesn't forward key events. Tracks Ctrl / Alt held state
-// across separate keydown/keyup events and triggers a warm reboot the
-// moment Del arrives with both modifiers held. The reboot preserves
-// .uninitialized_data and the selector cursor scratch registers, so
-// the next boot comes right back to the game picker.
+// across separate keydown/keyup events. On a match we set a pending
+// flag; the OSystem pollEvent translator consumes it and returns a
+// Common::EVENT_QUIT so ScummVM engines exit run() cleanly and the
+// selector loop in cabal_main() gets control back. No hardware reboot.
 
 namespace {
     bool g_fq_ctrl_held = false;
     bool g_fq_alt_held  = false;
+    volatile int g_fq_quit_pending = 0;
 }
 
 // Update modifier state machine for a key event. `pressed` is 1 for
-// keydown, 0 for keyup. Returns true if Ctrl+Alt+Del was detected, in
-// which case the caller should NOT return the event — we reboot first.
-static bool fq_check_ctrl_alt_del(int keycode, int pressed) {
+// keydown, 0 for keyup.
+static void fq_check_ctrl_alt_del(int keycode, int pressed) {
     // CABAL_KEY_L/RCTRL = 305/306, CABAL_KEY_L/RALT = 307/308. See
     // drivers/usbhid/usbkbd_wrapper.c for the canonical mapping; the
     // PS/2 path passes through raw HID codes (0xE0, 0xE2) which we
@@ -549,13 +543,25 @@ static bool fq_check_ctrl_alt_del(int keycode, int pressed) {
 
     if (pressed && g_fq_ctrl_held && g_fq_alt_held &&
         (keycode == CABAL_KEY_DELETE || keycode == 0x4C)) {
-        printf("\nFRANK Quest: Ctrl+Alt+Del — rebooting to selector\n");
-        // Tiny delay so the printf drains over USB CDC before the
-        // watchdog timer expires.
-        watchdog_reboot(0, 0, 50);
-        for (;;) tight_loop_contents();
+        printf("\nFRANK Quest: Ctrl+Alt+Del — requesting engine quit\n");
+        g_fq_quit_pending = 1;
     }
-    return false;
+}
+
+// Public hooks used by OSystem_RP2350::pollEvent to translate the
+// pending flag into a Common::EVENT_QUIT for the engine.
+extern "C" int frank_quest_cad_consume(void) {
+    if (g_fq_quit_pending) {
+        g_fq_quit_pending = 0;
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" void frank_quest_cad_clear(void) {
+    g_fq_quit_pending = 0;
+    g_fq_ctrl_held = false;
+    g_fq_alt_held = false;
 }
 
 #ifdef USB_HID_ENABLED
@@ -673,16 +679,31 @@ bool cabal_poll_event(CabalEvent *event) {
     // Ctrl+Alt+Del detection (modifier keys and Del don't land in the
     // ASCII space reliably).
     int pressed;
-    unsigned char keycode;
+    unsigned char ascii_byte;
     uint8_t hid_code;
-    if (ps2kbd_get_key_ext(&pressed, &keycode, &hid_code)) {
+    if (ps2kbd_get_key_ext(&pressed, &ascii_byte, &hid_code)) {
         // Ctrl+Alt+Del → reboot to selector. Never returns on match.
         fq_check_ctrl_alt_del(hid_code, pressed);
 
-        // HID 0x4C = Delete — translate so engines that key off
-        // CABAL_KEY_DELETE see it correctly.
-        if (hid_code == 0x4C) {
-            keycode = CABAL_KEY_DELETE;
+        // ps2kbd_wrapper.cpp maps special keys to custom ASCII bytes
+        // (arrows→0x80..0x83, F-keys→0xF1..0xFC, Delete→0). Those
+        // values don't round-trip through OSystem_RP2350::convertKeyCode,
+        // so translate the raw HID code to the CABAL_KEY_* space the
+        // USB HID path already uses. Leaves regular ASCII keys alone.
+        // `keycode` is widened to int so values >255 (arrows etc.) fit.
+        int keycode = (int)ascii_byte;
+        switch (hid_code) {
+        case 0x52: keycode = CABAL_KEY_UP;     break;
+        case 0x51: keycode = CABAL_KEY_DOWN;   break;
+        case 0x4F: keycode = CABAL_KEY_RIGHT;  break;
+        case 0x50: keycode = CABAL_KEY_LEFT;   break;
+        case 0x49: keycode = 277;              break;  // CABAL_KEY_INSERT
+        case 0x4A: keycode = 278;              break;  // CABAL_KEY_HOME
+        case 0x4D: keycode = 279;              break;  // CABAL_KEY_END
+        case 0x4B: keycode = 280;              break;  // CABAL_KEY_PAGEUP
+        case 0x4E: keycode = 281;              break;  // CABAL_KEY_PAGEDOWN
+        case 0x4C: keycode = CABAL_KEY_DELETE; break;
+        default:                               break;
         }
 
         event->type = pressed ? CABAL_EVENT_KEYDOWN : CABAL_EVENT_KEYUP;
