@@ -14,6 +14,10 @@
 #include "backends/platform/rp2350/rp2350-system.h"
 #include "backends/platform/rp2350/rp2350-minimal.h"
 #include "frank_quest_fs.h"
+#include "frank_quest_selector.h"
+
+#include "hardware/watchdog.h"
+#include "hardware/structs/watchdog.h"
 #include "common/system.h"
 #include "common/config-manager.h"
 #include "graphics/surface.h"
@@ -993,135 +997,88 @@ static bool launchScummGame(const char *gamePath) {
     return (err.getCode() == Common::kNoError);
 }
 
+// Dispatch a QuestGame to the engine launcher it belongs to. Returns
+// true if the engine reported success; false means the engine refused
+// to start (bad files, unsupported variant, etc.).
+static bool dispatchGame(const QuestGame &g) {
+    switch (g.engine) {
+    case QuestEngine::Scumm:
+        return launchScummGame(g.dirPath);
+    case QuestEngine::Sci:
+        // SCI detector ids mirror the launchSciGame fallback probe; pass
+        // NULL so detectSciGameId() runs against the directory name.
+        return launchSciGame(g.dirPath, nullptr);
+    case QuestEngine::Kyra:
+        return launchKyrandiaGame(g.dirPath, (int)g.engineSubtype);
+    case QuestEngine::Gob:
+        if (g.engineSubtype == 0) return launchGOBGame(g.dirPath);
+        return launchGOBGameWithVersion(g.dirPath, (int)g.engineSubtype);
+    case QuestEngine::Agi:
+        return launchAGIGame(g.dirPath);
+    }
+    return false;
+}
+
+// Pull the last-selected cursor index out of watchdog scratch so a
+// Ctrl+Alt+Del reboot returns to the same list position. The scratch
+// pair has a magic cookie to distinguish a cold boot from a warm one
+// the selector initiated.
+static int restoreSelectorIndex() {
+    if (watchdog_hw->scratch[FRANK_QUEST_SCRATCH_MAGIC_SLOT] !=
+        FRANK_QUEST_SCRATCH_MAGIC) {
+        return 0;
+    }
+    int idx = (int)watchdog_hw->scratch[FRANK_QUEST_SCRATCH_INDEX_SLOT];
+    // Clear magic so subsequent cold boots don't see stale data.
+    watchdog_hw->scratch[FRANK_QUEST_SCRATCH_MAGIC_SLOT] = 0;
+    if (idx < 0) idx = 0;
+    return idx;
+}
+
+static void persistSelectorIndex(int idx) {
+    watchdog_hw->scratch[FRANK_QUEST_SCRATCH_MAGIC_SLOT] = FRANK_QUEST_SCRATCH_MAGIC;
+    watchdog_hw->scratch[FRANK_QUEST_SCRATCH_INDEX_SLOT] = (uint32_t)idx;
+}
+
 // Main game loop - called from main.c
 extern "C" int cabal_main(void) {
-    printf("Cabal: Starting with OSystem backend...\n");
+    printf("FRANK Quest: Starting with OSystem backend...\n");
 
-    // Try to launch a LucasArts SCUMM game (v1-v6)
-    static const char *const scummDirs[] = {
-        "/cabal/mi1", "/cabal/mi1ega", "/cabal/mi1cd", "/cabal/monkey",
-        "/cabal/mi2", "/cabal/monkey2",
-        "/cabal/dott", "/cabal/tentacle",
-        "/cabal/samnmax", "/cabal/sam",
-        "/cabal/atlantis", "/cabal/indy4",
-        "/cabal/loom",
-        "/cabal/ft", "/cabal/fulltp",
-        nullptr,
-    };
-    for (int i = 0; scummDirs[i]; i++) {
-        if (cabal_path_exists(scummDirs[i])) {
-            printf("Cabal: Found SCUMM directory at %s, launching...\n", scummDirs[i]);
-            if (launchScummGame(scummDirs[i])) {
-                printf("Cabal: SCUMM game completed.\n");
-                return 0;
-            }
-            printf("Cabal: SCUMM launch from %s failed, trying next engine.\n",
-                   scummDirs[i]);
-            break;
-        }
+    // Scan /quest on SD card for games.
+    static QuestGame games[64];
+    int count = frank_quest_scan_games(games, 64);
+    printf("FRANK Quest: %d game(s) detected under /quest\n", count);
+
+    int initialIndex = restoreSelectorIndex();
+    int selected = frank_quest_run_selector(games, count, initialIndex);
+
+    if (selected < 0 || selected >= count) {
+        // No game — sit on the selector screen. The user still has
+        // Ctrl+Alt+Del to reboot.
+        printf("FRANK Quest: no game selected; idling.\n");
+        while (true) g_system->delayMillis(100);
     }
 
-    // Try to launch a Sierra SCI game
-    static const char *const sciDirs[] = {
-        "/cabal/sci",
-        "/cabal/lsl1", "/cabal/lsl2", "/cabal/lsl3", "/cabal/lsl5", "/cabal/lsl6",
-        "/cabal/kq1",  "/cabal/kq4",  "/cabal/kq5",  "/cabal/kq6",
-        "/cabal/sq1",  "/cabal/sq3",  "/cabal/sq4",  "/cabal/sq5",
-        "/cabal/pq1",  "/cabal/pq2",  "/cabal/pq3",
-        "/cabal/qfg1", "/cabal/qfg1vga", "/cabal/qfg2", "/cabal/qfg3",
-        "/cabal/iceman", "/cabal/laurabow", "/cabal/laurabow2",
-        "/cabal/longbow", "/cabal/ecoquest", "/cabal/ecoquest2",
-        "/cabal/freddy", "/cabal/jones", "/cabal/pepper", "/cabal/slater",
-        "/cabal/castlebrain", "/cabal/islandbrain", "/cabal/mothergoose",
-        "/cabal/camelot",
-        nullptr,
-    };
-    for (int i = 0; sciDirs[i]; i++) {
-        if (cabal_path_exists(sciDirs[i])) {
-            printf("Cabal: Found SCI directory at %s, launching...\n", sciDirs[i]);
-            if (launchSciGame(sciDirs[i], nullptr)) {
-                printf("Cabal: SCI game completed.\n");
-                return 0;
-            }
-            printf("Cabal: SCI launch from %s failed, trying next engine.\n",
-                   sciDirs[i]);
-            break;
-        }
+    // Persist the selected index so Ctrl+Alt+Del during the game comes
+    // back to the same cursor position.
+    persistSelectorIndex(selected);
+
+    const QuestGame &g = games[selected];
+    printf("FRANK Quest: launching %s (engine=%d path=%s)\n",
+           g.displayName, (int)g.engine, g.dirPath);
+
+    if (dispatchGame(g)) {
+        printf("FRANK Quest: game completed cleanly.\n");
+    } else {
+        printf("FRANK Quest: game dispatch failed.\n");
     }
 
-    // Try to launch a Kyrandia game. Kyra 2 first so "/cabal/kyra2" wins
-    // unambiguously when both directories exist.
-    struct KyraProbe { const char *path; int gameId; };
-    static const KyraProbe kKyraProbes[] = {
-        {"/cabal/kyra2",     1},
-        {"/cabal/kyr2",      1},
-        {"/cabal/kyrandia2", 1},
-        {"/cabal/handoffate",1},
-        {"/cabal/kyra1",     0},
-        {"/cabal/kyr1",      0},
-        {"/cabal/kyrandia",  0},
-    };
-    for (const auto &p : kKyraProbes) {
-        if (!cabal_path_exists(p.path)) continue;
-        printf("Cabal: Found Kyrandia directory at %s, launching...\n", p.path);
-        if (launchKyrandiaGame(p.path, p.gameId)) {
-            printf("Cabal: Kyrandia game completed.\n");
-            return 0;
-        }
-        printf("Cabal: Kyrandia launch failed.\n");
-        break;
-    }
+    // Always return to selector on engine exit via a warm reboot. The
+    // engines hold ~5 MB of PSRAM allocations with no tidy teardown
+    // path, so a clean heap is much safer than trying to unwind.
+    printf("FRANK Quest: rebooting to selector...\n");
+    watchdog_reboot(0, 0, 10);
+    while (true) tight_loop_contents();
 
-    // Try to launch a GOB (Gobliins) game if found on SD card
-    if (cabal_path_exists("/cabal/gob2")) {
-        printf("Cabal: Found GOB2 directory, launching Gobliiins 2...\n");
-        if (launchGOBGameWithVersion("/cabal/gob2", 2)) {
-            printf("Cabal: GOB game completed.\n");
-            return 0;
-        }
-    }
-    if (cabal_path_exists("/cabal/gob3")) {
-        printf("Cabal: Found GOB3 directory, launching Gobliiins 3...\n");
-        if (launchGOBGameWithVersion("/cabal/gob3", 3)) {
-            printf("Cabal: GOB game completed.\n");
-            return 0;
-        }
-    }
-    if (cabal_path_exists("/cabal/gob1")) {
-        printf("Cabal: Found GOB1 directory, launching Gobliiins 1...\n");
-        if (launchGOBGameWithVersion("/cabal/gob1", 1)) {
-            printf("Cabal: GOB game completed.\n");
-            return 0;
-        }
-    }
-    // Fall back to auto-detect with /cabal/gob
-    if (cabal_path_exists("/cabal/gob")) {
-        printf("Cabal: Found GOB game directory, auto-detecting version...\n");
-        if (launchGOBGame("/cabal/gob")) {
-            printf("Cabal: GOB game completed.\n");
-            return 0;
-        }
-        printf("Cabal: GOB game launch failed, trying AGI...\n");
-    }
-
-    // Try to launch an AGI game if found on SD card
-    if (cabal_path_exists("/cabal/agi")) {
-        printf("Cabal: Found AGI game directory, attempting to launch...\n");
-        if (launchAGIGame("/cabal/agi")) {
-            printf("Cabal: AGI game completed.\n");
-            return 0;
-        }
-        printf("Cabal: AGI game launch failed, falling back to test mode.\n");
-    }
-
-    // Fallback: Draw test pattern using OSystem
-    drawTestPatternOSystem();
-
-    // Run event loop
-    eventLoopOSystem();
-
-    printf("Cabal: Exiting.\n");
-    // Note: Don't delete g_system - OSystem destructor is protected
-    // The system will clean up on program exit
     return 0;
 }

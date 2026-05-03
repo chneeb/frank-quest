@@ -728,6 +728,7 @@ set(BACKEND_SOURCES
 add_executable(frank-quest
     src/main.c
     src/frank_quest_main.cpp
+    src/frank_quest_selector.cpp
     src/frank_quest_new.cpp
     src/frank_quest_fs.c
     src/frank_quest_sbrk.c

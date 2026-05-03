@@ -514,6 +514,50 @@ void cabal_set_mouse_cursor(const uint8_t *data, int w, int h,
 // Events
 //============================================================================
 
+// ---- Ctrl+Alt+Del watchdog reboot -------------------------------------
+//
+// Detected at the lowest event layer so it works even if the active
+// engine doesn't forward key events. Tracks Ctrl / Alt held state
+// across separate keydown/keyup events and triggers a warm reboot the
+// moment Del arrives with both modifiers held. The reboot preserves
+// .uninitialized_data and the selector cursor scratch registers, so
+// the next boot comes right back to the game picker.
+
+namespace {
+    bool g_fq_ctrl_held = false;
+    bool g_fq_alt_held  = false;
+}
+
+// Update modifier state machine for a key event. `pressed` is 1 for
+// keydown, 0 for keyup. Returns true if Ctrl+Alt+Del was detected, in
+// which case the caller should NOT return the event — we reboot first.
+static bool fq_check_ctrl_alt_del(int keycode, int pressed) {
+    // CABAL_KEY_L/RCTRL = 305/306, CABAL_KEY_L/RALT = 307/308. See
+    // drivers/usbhid/usbkbd_wrapper.c for the canonical mapping; the
+    // PS/2 path passes through raw HID codes (0xE0, 0xE2) which we
+    // translate below.
+    switch (keycode) {
+    case 305: case 306: case 0xE0: case 0xE4:
+        g_fq_ctrl_held = pressed != 0;
+        break;
+    case 307: case 308: case 0xE2: case 0xE6:
+        g_fq_alt_held = pressed != 0;
+        break;
+    default:
+        break;
+    }
+
+    if (pressed && g_fq_ctrl_held && g_fq_alt_held &&
+        (keycode == CABAL_KEY_DELETE || keycode == 0x4C)) {
+        printf("\nFRANK Quest: Ctrl+Alt+Del — rebooting to selector\n");
+        // Tiny delay so the printf drains over USB CDC before the
+        // watchdog timer expires.
+        watchdog_reboot(0, 0, 50);
+        for (;;) tight_loop_contents();
+    }
+    return false;
+}
+
 #ifdef USB_HID_ENABLED
 // USB HID event polling
 bool cabal_poll_event(CabalEvent *event) {
@@ -523,6 +567,9 @@ bool cabal_poll_event(CabalEvent *event) {
     // Check for keyboard events
     int is_down, keycode;
     if (usbkbd_get_key(&is_down, &keycode)) {
+        // Ctrl+Alt+Del → reboot to selector. Never returns on match.
+        fq_check_ctrl_alt_del(keycode, is_down);
+
         event->type = is_down ? CABAL_EVENT_KEYDOWN : CABAL_EVENT_KEYUP;
         event->kbd.keycode = keycode;
 
@@ -621,10 +668,23 @@ bool cabal_poll_event(CabalEvent *event) {
     // Poll keyboard
     ps2kbd_tick();
 
-    // Check for keyboard events
+    // Check for keyboard events. Use the extended API so we get the
+    // raw HID code alongside the ASCII byte — we need the HID code for
+    // Ctrl+Alt+Del detection (modifier keys and Del don't land in the
+    // ASCII space reliably).
     int pressed;
     unsigned char keycode;
-    if (ps2kbd_get_key(&pressed, &keycode)) {
+    uint8_t hid_code;
+    if (ps2kbd_get_key_ext(&pressed, &keycode, &hid_code)) {
+        // Ctrl+Alt+Del → reboot to selector. Never returns on match.
+        fq_check_ctrl_alt_del(hid_code, pressed);
+
+        // HID 0x4C = Delete — translate so engines that key off
+        // CABAL_KEY_DELETE see it correctly.
+        if (hid_code == 0x4C) {
+            keycode = CABAL_KEY_DELETE;
+        }
+
         event->type = pressed ? CABAL_EVENT_KEYDOWN : CABAL_EVENT_KEYUP;
         event->kbd.keycode = keycode;
 
