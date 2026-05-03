@@ -1,9 +1,14 @@
 /*
- * USB HID Host Application Callbacks for murm386
- * Implements TinyUSB Host callbacks for keyboard
+ * FRANK Quest - USB HID Host Application Callbacks
  *
- * Based on TinyUSB HID host example
- * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * Based on the TinyUSB HID host example (MIT-licensed upstream).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Implements TinyUSB Host callbacks for keyboard.
  */
 
 #include "tusb.h"

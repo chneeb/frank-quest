@@ -1,6 +1,13 @@
-/**
- * USB Keyboard wrapper for Cabal
- * Converts HID keycodes to Cabal keycodes (same format as PS/2 wrapper)
+/*
+ * FRANK Quest - USB Keyboard wrapper
+ *
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Converts HID keycodes to the same keycode format as the PS/2 wrapper.
  */
 
 #include "usbkbd_wrapper.h"

@@ -1,6 +1,13 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Filesystem implementation for RP2350 using cabal_fs
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Filesystem implementation for RP2350 using frank_quest_fs.
  */
 
 #ifndef BACKENDS_FS_RP2350_FS_H

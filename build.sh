@@ -1,5 +1,11 @@
 #!/bin/bash
-# Build script for Cabal (ScummVM port for RP2350)
+# FRANK Quest - Build script (ScummVM port for RP2350)
+#
+# Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+# https://github.com/rh1tech/frank-quest
+#
+# Derived from Cabal (https://github.com/project-cabal/cabal).
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Usage: ./build.sh [BOARD] [CPU_MHZ] [PSRAM_MHZ] [FLASH_MHZ] [usb-hid] [clean]
 # Defaults: M2 504 133 66
@@ -36,7 +42,7 @@ if [[ "$BOARD" != "M1" && "$BOARD" != "M2" ]]; then
     exit 1
 fi
 
-echo "Building Cabal:"
+echo "Building FRANK Quest:"
 echo "  Board: $BOARD"
 echo "  CPU:   $CPU MHz"
 echo "  PSRAM: $PSRAM MHz"
@@ -73,7 +79,7 @@ make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 echo ""
 echo "Build complete!"
-echo "  Firmware: build/frank-cabal.uf2"
-if [[ -f frank-cabal.uf2 ]]; then
-    echo "  Size: $(ls -lh frank-cabal.uf2 | awk '{print $5}')"
+echo "  Firmware: build/frank-quest.uf2"
+if [[ -f frank-quest.uf2 ]]; then
+    echo "  Size: $(ls -lh frank-quest.uf2 | awk '{print $5}')"
 fi

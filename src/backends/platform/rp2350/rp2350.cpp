@@ -1,11 +1,17 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Cabal is the legal property of its developers.
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 2
  * of the License, or (at your option) any later version.
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
 #include "backends/platform/rp2350/rp2350.h"
@@ -21,7 +27,7 @@
 #include <string.h>
 
 extern "C" {
-#include "cabal_fs.h"
+#include "frank_quest_fs.h"
 }
 
 // External PSRAM allocation

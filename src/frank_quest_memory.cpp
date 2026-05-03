@@ -1,7 +1,14 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Memory allocation overrides for RP2350
- * Uses linker --wrap to redirect malloc/free to PSRAM
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Memory allocation overrides for RP2350. Uses linker --wrap to
+ * redirect malloc/free to PSRAM.
  */
 
 #include <cstdlib>

@@ -1,11 +1,14 @@
 /*
- * TinyUSB Configuration for USB Host HID (Keyboard)
- * Uses native USB port for Host mode
+ * FRANK Quest - TinyUSB Configuration for USB Host HID (Keyboard)
  *
- * NOTE: When USB HID is enabled, USB CDC stdio is DISABLED!
- * Use UART for debug output instead.
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
  *
- * SPDX-License-Identifier: MIT
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Uses native USB port for Host mode. NOTE: When USB HID is enabled,
+ * USB CDC stdio is DISABLED; use UART for debug output instead.
  */
 
 #ifndef TUSB_CONFIG_H

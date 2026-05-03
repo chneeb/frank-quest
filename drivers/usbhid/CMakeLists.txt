@@ -1,7 +1,12 @@
-# USB HID Driver for murm386
-# Provides keyboard input via USB Host
+# FRANK Quest - USB HID Driver
 #
-# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+# https://github.com/rh1tech/frank-quest
+#
+# Derived from Cabal (https://github.com/project-cabal/cabal).
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Provides keyboard input via USB Host.
 
 add_library(usbhid INTERFACE)
 

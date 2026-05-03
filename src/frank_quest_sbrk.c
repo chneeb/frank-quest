@@ -6,13 +6,13 @@
  *
  * Derived from Cabal (https://github.com/project-cabal/cabal).
  * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Enable PSRAM heap after hardware initialization.
  */
 
-#ifndef PSRAM_INIT_H
-#define PSRAM_INIT_H
+#include "psram_allocator.h"
 
-#include "pico/stdlib.h"
-
-void psram_init(uint cs_pin);
-
-#endif
+// Called after PSRAM hardware is initialized
+void cabal_enable_psram_heap(void) {
+    psram_set_ready(1);  // Enable PSRAM allocations in new/malloc
+}

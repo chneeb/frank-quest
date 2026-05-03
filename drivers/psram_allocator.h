@@ -1,3 +1,13 @@
+/*
+ * FRANK Quest
+ *
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
 #ifndef PSRAM_ALLOCATOR_H
 #define PSRAM_ALLOCATOR_H
 
@@ -29,5 +39,10 @@ void psram_set_ready(int ready);      // Call after PSRAM hardware is initialize
 
 // Debug: Print memory status
 void psram_print_status(void);
+
+// Debug: walk the PSRAM heap, print chunk list and used/free totals.
+// Safe to call while audio/HDMI IRQs are running. Useful to snapshot
+// heap state right before a suspected-corrupting operation.
+void frank_quest_heap_walk(void);
 
 #endif

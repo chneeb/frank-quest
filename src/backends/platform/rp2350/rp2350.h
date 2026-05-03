@@ -1,6 +1,10 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Cabal is the legal property of its developers.
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -11,6 +15,8 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
 #ifndef BACKENDS_PLATFORM_RP2350_H

@@ -1,13 +1,19 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Cabal Main Entry Point for RP2350
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
  *
- * This initializes the ScummVM-compatible OSystem and runs the game.
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Main entry point for RP2350; initializes the ScummVM-compatible
+ * OSystem and runs the game.
  */
 
 #include "backends/platform/rp2350/rp2350-system.h"
 #include "backends/platform/rp2350/rp2350-minimal.h"
-#include "cabal_fs.h"
+#include "frank_quest_fs.h"
 #include "common/system.h"
 #include "common/config-manager.h"
 #include "graphics/surface.h"

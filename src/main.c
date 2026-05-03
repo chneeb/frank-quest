@@ -1,7 +1,13 @@
 /*
- * Cabal - ScummVM port for RP2350 with 8MB QSPI PSRAM
+ * FRANK Quest - ScummVM port for RP2350 with 8MB QSPI PSRAM
  *
- * Main entry point with hardware initialization
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Main entry point with hardware initialization.
  */
 
 #include <stdio.h>

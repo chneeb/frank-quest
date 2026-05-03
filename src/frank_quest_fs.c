@@ -1,9 +1,16 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Filesystem Implementation using FatFS
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Filesystem implementation using FatFS.
  */
 
-#include "cabal_fs.h"
+#include "frank_quest_fs.h"
 #include "fatfs/ff.h"
 #include "fatfs/diskio.h"
 #include <stdio.h>

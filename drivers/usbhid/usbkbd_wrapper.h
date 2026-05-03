@@ -1,8 +1,13 @@
-/**
- * USB Keyboard wrapper for murm386
- * Converts HID keycodes to Linux input keycodes for ps2_put_keycode()
+/*
+ * FRANK Quest - USB Keyboard wrapper
  *
- * Same interface as ps2kbd_wrapper for easy integration
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Same interface as ps2kbd_wrapper for easy integration.
  */
 
 #ifndef USBKBD_WRAPPER_H

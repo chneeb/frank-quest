@@ -1,6 +1,13 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * RP2350 OSystem implementation
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * RP2350 OSystem implementation.
  */
 
 #ifndef BACKENDS_PLATFORM_RP2350_SYSTEM_H

@@ -1,6 +1,13 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Minimal RP2350 Backend Implementation
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Minimal RP2350 backend implementation.
  */
 
 #include "backends/platform/rp2350/rp2350-minimal.h"

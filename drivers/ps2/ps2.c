@@ -1,10 +1,15 @@
-/**
- * Unified PS/2 Driver for RP2350
- * 
- * Single PIO program shared between keyboard and mouse state machines.
- * Uses interrupt-driven streaming mode for performant, non-blocking operation.
- * 
+/*
+ * FRANK Quest - Unified PS/2 Driver for RP2350
+ *
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
  * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Single PIO program shared between keyboard and mouse state machines.
+ * Uses interrupt-driven streaming mode for performant, non-blocking
+ * operation.
  */
 
 #include "ps2.h"

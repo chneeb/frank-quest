@@ -1,9 +1,15 @@
-/* Custom linker script for Cabal (ScummVM on RP2350)
- * Based on Pico SDK memmap_default.ld
+/* FRANK Quest - Custom linker script (ScummVM on RP2350)
  *
- * Key change: Places the main stack in RAM instead of SCRATCH_Y
- * to provide 64KB stack instead of the default 4KB.
- * This is required for the GOB engine's deep call chains.
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * Based on Pico SDK memmap_default.ld.
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Key change: Places the main stack in RAM instead of SCRATCH_Y to
+ * provide 64KB stack instead of the default 4KB. This is required for
+ * the GOB engine's deep call chains.
  */
 
 MEMORY

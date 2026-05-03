@@ -1,9 +1,17 @@
-/* Cabal - Legacy Game Implementations
+/*
+ * FRANK Quest
  *
- * Minimal RP2350 Backend - Self-contained, no ScummVM dependencies
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Minimal RP2350 backend - self-contained, no ScummVM dependencies.
  *
  * This is a simplified backend for embedded systems that provides
- * just the essential functionality without the full ScummVM infrastructure.
+ * just the essential functionality without the full ScummVM
+ * infrastructure.
  */
 
 #ifndef BACKENDS_PLATFORM_RP2350_MINIMAL_H

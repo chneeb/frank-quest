@@ -1,3 +1,13 @@
+/*
+ * FRANK Quest
+ *
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
 #ifndef BOARD_CONFIG_H
 #define BOARD_CONFIG_H
 
@@ -5,7 +15,7 @@
 #include "hardware/vreg.h"
 
 /*
- * Board Configuration Variants for Cabal (ScummVM port for RP2350)
+ * Board Configuration Variants for FRANK Quest (ScummVM port for RP2350)
  *
  * BOARD_M1 - M1 GPIO layout (default)
  * BOARD_M2 - M2 GPIO layout

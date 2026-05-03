@@ -1,3 +1,11 @@
+# FRANK Quest - ScummVM port for RP2350
+#
+# Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+# https://github.com/rh1tech/frank-quest
+#
+# Derived from Cabal (https://github.com/project-cabal/cabal).
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 cmake_minimum_required(VERSION 3.13)
 
 # Set board to Pico 2 (RP2350)
@@ -29,7 +37,7 @@ else()
     set(CPU_VOLTAGE "VREG_VOLTAGE_1_50")
 endif()
 
-message(STATUS "Cabal Build Configuration:")
+message(STATUS "FRANK Quest Build Configuration:")
 message(STATUS "  Board: ${BOARD_VARIANT}")
 message(STATUS "  CPU: ${CPU_SPEED} MHz")
 message(STATUS "  PSRAM: ${PSRAM_SPEED} MHz")
@@ -49,7 +57,7 @@ if(EXISTS ${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
     include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 endif()
 
-project(frank-cabal C CXX ASM)
+project(frank-quest C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -116,7 +124,7 @@ target_compile_definitions(drivers PRIVATE
 # USAGE_ERROR_ACTION / CORRUPTION_ERROR_ACTION route to cabal_heap_error so the
 # diagnostic survives the expected trap that follows.
 set_source_files_properties(drivers/dlmalloc.c PROPERTIES COMPILE_DEFINITIONS
-    "ONLY_MSPACES=1;HAVE_MMAP=0;HAVE_MORECORE=0;NO_MALLOC_STATS=1;USE_LOCKS=0;ABORT_ON_ASSERT_FAILURE=0;MALLOC_FAILURE_ACTION=;LACKS_SYS_MMAN_H=1;LACKS_UNISTD_H=1;LACKS_SYS_PARAM_H=1;FOOTERS=1;PROCEED_ON_ERROR=0")
+    "ONLY_MSPACES=1;HAVE_MMAP=0;HAVE_MORECORE=0;NO_MALLOC_STATS=1;USE_LOCKS=0;ABORT_ON_ASSERT_FAILURE=0;MALLOC_FAILURE_ACTION=;LACKS_SYS_MMAN_H=1;LACKS_UNISTD_H=1;LACKS_SYS_PARAM_H=1;FOOTERS=1;PROCEED_ON_ERROR=0;MALLOC_INSPECT_ALL=1")
 target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi)
 
 # ScummVM Common library
@@ -717,12 +725,12 @@ set(BACKEND_SOURCES
 )
 
 # Main executable
-add_executable(frank-cabal
+add_executable(frank-quest
     src/main.c
-    src/cabal_main.cpp
-    src/cabal_new.cpp
-    src/cabal_fs.c
-    src/cabal_sbrk.c
+    src/frank_quest_main.cpp
+    src/frank_quest_new.cpp
+    src/frank_quest_fs.c
+    src/frank_quest_sbrk.c
     ${COMMON_SOURCES}
     ${GRAPHICS_SOURCES}
     ${GUI_SOURCES}
@@ -740,7 +748,7 @@ add_executable(frank-cabal
     ${BACKEND_SOURCES}
 )
 
-target_include_directories(frank-cabal PRIVATE
+target_include_directories(frank-quest PRIVATE
     src
     src/engines
     src/fatfs
@@ -754,7 +762,7 @@ target_include_directories(frank-cabal PRIVATE
 # ScummVM include paths - src is the root for all ScummVM headers
 # Headers use paths like "common/system.h", "backends/base-backend.h", etc.
 
-target_compile_definitions(frank-cabal PRIVATE
+target_compile_definitions(frank-quest PRIVATE
     BOARD_${BOARD_VARIANT}
     CPU_CLOCK_MHZ=${CPU_SPEED}
     CPU_VOLTAGE=${CPU_VOLTAGE}
@@ -803,7 +811,7 @@ target_compile_definitions(frank-cabal PRIVATE
 
 # Set peripheral pins based on board variant
 if(BOARD_VARIANT STREQUAL "M1")
-    target_compile_definitions(frank-cabal PRIVATE
+    target_compile_definitions(frank-quest PRIVATE
         # I2S Audio
         PICO_AUDIO_I2S_DATA_PIN=26
         PICO_AUDIO_I2S_CLOCK_PIN_BASE=27
@@ -814,7 +822,7 @@ if(BOARD_VARIANT STREQUAL "M1")
         SDCARD_PIN_SPI0_MISO=4
     )
 elseif(BOARD_VARIANT STREQUAL "M2")
-    target_compile_definitions(frank-cabal PRIVATE
+    target_compile_definitions(frank-quest PRIVATE
         # I2S Audio
         PICO_AUDIO_I2S_DATA_PIN=9
         PICO_AUDIO_I2S_CLOCK_PIN_BASE=10
@@ -827,7 +835,7 @@ elseif(BOARD_VARIANT STREQUAL "M2")
 endif()
 
 
-target_link_libraries(frank-cabal
+target_link_libraries(frank-quest
     pico_stdlib
     pico_multicore
     hardware_spi
@@ -846,26 +854,26 @@ target_link_libraries(frank-cabal
 
 # Add custom I2S audio driver
 include(${CMAKE_CURRENT_LIST_DIR}/drivers/audio/CMakeLists.txt)
-target_compile_definitions(frank-cabal PRIVATE USE_I2S_AUDIO=1)
+target_compile_definitions(frank-quest PRIVATE USE_I2S_AUDIO=1)
 
 # USB HID configuration
 if(USB_HID_ENABLED)
     message(STATUS "USB HID enabled: Using UART for stdio")
-    target_link_libraries(frank-cabal usbhid)
-    target_compile_definitions(frank-cabal PRIVATE USB_HID_ENABLED=1)
-    pico_enable_stdio_usb(frank-cabal 0)
-    pico_enable_stdio_uart(frank-cabal 1)
+    target_link_libraries(frank-quest usbhid)
+    target_compile_definitions(frank-quest PRIVATE USB_HID_ENABLED=1)
+    pico_enable_stdio_usb(frank-quest 0)
+    pico_enable_stdio_uart(frank-quest 1)
 else()
     message(STATUS "USB Serial Console enabled for debug")
-    pico_enable_stdio_usb(frank-cabal 1)
-    pico_enable_stdio_uart(frank-cabal 0)
+    pico_enable_stdio_usb(frank-quest 1)
+    pico_enable_stdio_uart(frank-quest 0)
 endif()
 
 # Use custom linker script with 64KB stack (instead of default 4KB in SCRATCH_Y)
 # This is required for the GOB engine's deep call chains
-pico_set_linker_script(frank-cabal ${CMAKE_CURRENT_LIST_DIR}/linker/memmap_cabal.ld)
+pico_set_linker_script(frank-quest ${CMAKE_CURRENT_LIST_DIR}/linker/memmap_frank_quest.ld)
 
-pico_add_extra_outputs(frank-cabal)
+pico_add_extra_outputs(frank-quest)
 
 # Print memory usage estimate
 message(STATUS "")

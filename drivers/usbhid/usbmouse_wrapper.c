@@ -1,6 +1,13 @@
-/**
- * USB Mouse wrapper for murm386
- * Provides USB mouse events for the PS/2 mouse emulation
+/*
+ * FRANK Quest - USB Mouse wrapper
+ *
+ * Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+ * https://github.com/rh1tech/frank-quest
+ *
+ * Derived from Cabal (https://github.com/project-cabal/cabal).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Provides USB mouse events for the PS/2 mouse emulation path.
  */
 
 #include "usbmouse_wrapper.h"
