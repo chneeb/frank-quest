@@ -262,7 +262,7 @@ static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion) {
 
     // Set up the game path in config manager
     ConfMan.set("path", gamePath);
-    ConfMan.setActiveDomain("cabal-gob");
+    ConfMan.setActiveDomain("quest-gob");
 
     // Set default audio/config values that Engine::syncSoundSettings() expects
     ConfMan.setInt("music_volume", 192);
@@ -380,7 +380,7 @@ static bool launchAGIGame(const char *gamePath) {
 
     // Set up the game path in config manager
     ConfMan.set("path", gamePath);
-    ConfMan.setActiveDomain("cabal-agi");
+    ConfMan.setActiveDomain("quest-agi");
 
     // Set default audio/config values that Engine::syncSoundSettings() expects
     ConfMan.setInt("music_volume", 192);
@@ -550,29 +550,25 @@ extern "C" void cabal_init(void) {
     // Initialize graphics (320x200 for classic games)
     g_system->initSize(320, 200, nullptr);
 
-    // Initialize filesystem (using cabal_fs directly)
-    printf("Cabal: Initializing filesystem...\n");
+    // Initialize filesystem (SD card via FatFS).
+    printf("FRANK Quest: Initializing filesystem...\n");
     CabalFsResult fsResult = cabal_fs_init();
     if (fsResult == CABAL_FS_OK) {
-        printf("Cabal: Filesystem ready.\n");
+        printf("FRANK Quest: Filesystem ready.\n");
 
-        // List root directory
-        listDirectory("/");
-
-        // List cabal directory if it exists
-        if (cabal_path_exists("/cabal")) {
-            listDirectory("/cabal");
+        if (cabal_path_exists("/quest")) {
+            listDirectory("/quest");
         } else {
-            printf("Note: /cabal directory not found on SD card.\n");
+            printf("Note: /quest directory not found on SD card.\n");
         }
     } else {
-        printf("Cabal: Filesystem init failed (error=%d)\n", fsResult);
+        printf("FRANK Quest: Filesystem init failed (error=%d)\n", fsResult);
     }
 
-    // Create save directory (must be after filesystem init)
-    cabal_mkdir("/cabal/saves");
+    // Create save directory (must be after filesystem init).
+    cabal_mkdir("/quest/saves");
 
-    printf("Cabal: System ready.\n");
+    printf("FRANK Quest: System ready.\n");
 }
 
 // Kyrandia game launcher
@@ -583,7 +579,7 @@ static bool launchKyrandiaGame(const char *gamePath, int gameId) {
            gamePath);
 
     ConfMan.set("path", gamePath);
-    ConfMan.setActiveDomain("cabal-kyra");
+    ConfMan.setActiveDomain("quest-kyra");
 
     // Audio/config defaults
     ConfMan.setInt("music_volume", 192);
@@ -713,7 +709,7 @@ static bool launchSciGame(const char *gamePath, const char *gameIdStr) {
            gameIdStr ? gameIdStr : "(auto)");
 
     ConfMan.set("path", gamePath);
-    ConfMan.setActiveDomain("cabal-sci");
+    ConfMan.setActiveDomain("quest-sci");
 
     ConfMan.setInt("music_volume", 192);
     ConfMan.setInt("sfx_volume", 192);
@@ -872,7 +868,7 @@ static bool launchScummGame(const char *gamePath) {
            info->gameid, info->version, info->gameid, gamePath);
 
     ConfMan.set("path", gamePath);
-    ConfMan.setActiveDomain("cabal-scumm");
+    ConfMan.setActiveDomain("quest-scumm");
 
     ConfMan.setInt("music_volume", 192);
     ConfMan.setInt("sfx_volume", 192);
@@ -1128,6 +1124,12 @@ extern "C" int cabal_main(void) {
     // re-registered on every selector iteration because ConfMan is
     // torn down along with the other singletons below.
     registerConfManDefaults();
+
+    // Splash screen at cold boot. Auto-advances after 10 s; any key
+    // dismisses it immediately. cabal_main() only runs once per
+    // power-on — the return-to-selector path loops inside the while
+    // below and doesn't re-enter here — so no guard needed.
+    frank_quest_show_welcome(10000);
 
     // Outer loop: selector → game → teardown → back to selector.
     // HDMI stays locked across the loop because the framebuffer lives

@@ -184,7 +184,7 @@ int main(void) {
     }
 
     printf("\nCabal initialized successfully!\n");
-    printf("Game directory: /cabal/\n\n");
+    printf("Game directory: /quest/\n\n");
 
     // Initialize Cabal engine
     cabal_init();

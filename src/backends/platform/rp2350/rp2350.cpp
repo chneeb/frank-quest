@@ -412,7 +412,7 @@ void OSystem_RP2350::initBackend() {
     _mutexManager = new NullMutexManager();
     _timerManager = new DefaultTimerManager();
     _eventManager = new DefaultEventManager(this);
-    _savefileManager = new DefaultSaveFileManager("/cabal/saves");
+    _savefileManager = new DefaultSaveFileManager("/quest/saves");
 
     // Create graphics manager
     _graphicsManager = new RP2350GraphicsManager();

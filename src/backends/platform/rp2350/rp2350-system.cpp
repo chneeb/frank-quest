@@ -149,7 +149,7 @@ void OSystem_RP2350::initBackend() {
 	_audiocdManager = new RP2350AudioCDManager();
 
 	// Create save file manager
-	_savefileManager = new DefaultSaveFileManager("/cabal/saves");
+	_savefileManager = new DefaultSaveFileManager("/quest/saves");
 
 	printf("OSystem_RP2350: Backend initialized.\n");
 	OSystem::initBackend();

@@ -24,8 +24,9 @@ AbstractFSNode *RP2350FilesystemFactory::makeRootFileNode() const {
 }
 
 AbstractFSNode *RP2350FilesystemFactory::makeCurrentDirectoryFileNode() const {
-	// On RP2350, we use /cabal as the current directory
-	return new RP2350::RP2350FileSystemNode("/cabal");
+	// On RP2350 we use /quest as the current directory. All game data
+	// and saves live under /quest/<game>/ on the SD card.
+	return new RP2350::RP2350FileSystemNode("/quest");
 }
 
 AbstractFSNode *RP2350FilesystemFactory::makeFileNodePath(const Common::String &path) const {

@@ -193,6 +193,6 @@ static inline uint get_psram_pin(void) {
 #endif
 
 // Game data directory on SD card
-#define CABAL_GAME_DIR "cabal"
+#define CABAL_GAME_DIR "quest"
 
 #endif // BOARD_CONFIG_H
