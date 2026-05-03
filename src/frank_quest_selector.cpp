@@ -356,78 +356,161 @@ void installPalette() {
 	g_system->getPaletteManager()->setPalette(pal, 0, 6);
 }
 
+// ---- layout -------------------------------------------------------
+//
+// 320x200 screen. Single windowed frame with a title bar at the top,
+// the scrolling list beneath it, and a two-line legend below the
+// window. All coordinates are derived from these constants so
+// rendering and event math stay in sync.
+struct Layout {
+	int winX, winY, winW, winH;
+	int titleH;
+	int listX, listY;          // content origin
+	int listW;                 // content width (excludes scrollbar when present)
+	int lineH;
+	int visibleLines;
+	int legendY;
+	bool scrollbar;
+	int sbX, sbY, sbH, sbW;
+};
+
+constexpr int kLineH    = 10;
+constexpr int kTitleH   = 12;
+constexpr int kGlyphW   = 6;       // 5 px glyph + 1 px gap
+constexpr int kSbWidth  = 3;
+constexpr int kSbGap    = 3;
+
+Layout computeLayout(int screenW, int screenH, int itemCount) {
+	Layout L{};
+	L.winX   = 4;
+	L.winY   = 4;
+	L.winW   = screenW - 8;
+	L.titleH = kTitleH;
+	L.lineH  = kLineH;
+
+	// Reserve bottom 22 px for the two-line legend + gap.
+	const int legendBlock = 22;
+	L.winH   = screenH - L.winY - legendBlock;
+
+	// Content geometry inside the window.
+	const int contentTop    = L.winY + L.titleH + 2;
+	const int contentBottom = L.winY + L.winH - 3;
+	const int contentH      = contentBottom - contentTop;
+	L.visibleLines          = contentH / L.lineH;
+	if (L.visibleLines < 1) L.visibleLines = 1;
+
+	L.scrollbar = (itemCount > L.visibleLines);
+
+	// Content padding: matching 6 px gutter on both sides between the
+	// window border and the text so a full-width highlight row sits
+	// symmetrically inside the frame. When the scrollbar is visible it
+	// eats the right gutter.
+	L.listY = contentTop + 1;
+	L.listX = L.winX + 6;
+	const int rightReserve = L.scrollbar ? (kSbWidth + kSbGap + 3) : 6;
+	L.listW = (L.winX + L.winW) - L.listX - rightReserve;
+
+	L.sbW = kSbWidth;
+	L.sbX = L.winX + L.winW - L.sbW - 3;
+	L.sbY = L.listY;
+	L.sbH = L.visibleLines * L.lineH;
+
+	L.legendY = L.winY + L.winH + 4;
+	return L;
+}
+
+void drawWindow(Graphics::Surface *surf, const Layout &L, int count) {
+	// 1-px accent border.
+	fillRect(surf, L.winX, L.winY, L.winW, 1, kColAccent);
+	fillRect(surf, L.winX, L.winY + L.winH - 1, L.winW, 1, kColAccent);
+	fillRect(surf, L.winX, L.winY, 1, L.winH, kColAccent);
+	fillRect(surf, L.winX + L.winW - 1, L.winY, 1, L.winH, kColAccent);
+
+	// Title bar: solid accent fill, dark text.
+	fillRect(surf, L.winX + 1, L.winY + 1, L.winW - 2, L.titleH, kColAccent);
+	drawText(surf, L.winX + 6, L.winY + 3, "FRANK Quest", kColBg);
+
+	// Right-aligned game count inside the title bar.
+	char rightLabel[32];
+	snprintf(rightLabel, sizeof(rightLabel), "%d game%s",
+	         count, count == 1 ? "" : "s");
+	const int labelW = (int)strlen(rightLabel) * kGlyphW;
+	drawText(surf, L.winX + L.winW - 6 - labelW, L.winY + 3,
+	         rightLabel, kColBg);
+
+	// Thin separator between title bar and content.
+	fillRect(surf, L.winX + 1, L.winY + L.titleH + 1, L.winW - 2, 1,
+	         kColTrack);
+}
+
 void renderFrame(const QuestGame *games, int count,
-                 int selected, int scroll, int visibleLines,
-                 int listX, int listY, int lineH, int listW) {
+                 int selected, int scroll, const Layout &L) {
 	Graphics::Surface *surf = g_system->lockScreen();
 	if (!surf || !surf->getPixels()) {
 		if (surf) g_system->unlockScreen();
 		return;
 	}
 
-	fillRect(surf, 0, 0, surf->getWidth(), surf->getHeight(), kColBg);
+	const int SW = surf->getWidth();
+	const int SH = surf->getHeight();
+	fillRect(surf, 0, 0, SW, SH, kColBg);
 
-	// Title bar.
-	drawText(surf, 8,  6, "FRANK QUEST", kColAccent);
-	drawText(surf, 8, 16, "Select a game and press ENTER.", kColDim);
+	drawWindow(surf, L, count);
 
-	// Footer.
-	const int sh = surf->getHeight();
-	drawText(surf, 8, sh - 22,
-	         "UP/DOWN: navigate   ENTER: launch   CTRL+ALT+DEL: reset",
-	         kColDim);
-	char countLine[48];
-	snprintf(countLine, sizeof(countLine), "%d game%s on SD card",
-	         count, count == 1 ? "" : "s");
-	drawText(surf, 8, sh - 12, countLine, kColDim);
-
+	// List content.
 	if (count <= 0) {
-		drawText(surf, listX, listY,
-		         "NO GAMES FOUND IN /QUEST", kColText);
-		drawText(surf, listX, listY + lineH,
+		drawText(surf, L.listX, L.listY + 4,
+		         "No games found in /quest.", kColText);
+		drawText(surf, L.listX, L.listY + 4 + L.lineH,
 		         "Copy games to /quest/<dir>/ on the SD card.", kColDim);
-		g_system->unlockScreen();
-		g_system->updateScreen();
-		return;
-	}
-
-	int end = scroll + visibleLines;
-	if (end > count) end = count;
-
-	for (int i = scroll; i < end; ++i) {
-		const int y = listY + (i - scroll) * lineH;
-		if (i == selected) {
-			fillRect(surf, listX - 2, y - 1, listW + 4, lineH,
-			         kColHighlight);
-			drawText(surf, listX, y, games[i].displayName, kColText);
-		} else {
-			drawText(surf, listX, y, games[i].displayName, kColText);
+	} else {
+		int end = scroll + L.visibleLines;
+		if (end > count) end = count;
+		for (int i = scroll; i < end; ++i) {
+			const int y = L.listY + (i - scroll) * L.lineH;
+			if (i == selected) {
+				fillRect(surf, L.listX - 2, y - 1, L.listW + 4, L.lineH,
+				         kColHighlight);
+				drawText(surf, L.listX, y, games[i].displayName,
+				         kColText);
+			} else {
+				drawText(surf, L.listX, y, games[i].displayName,
+				         kColText);
+			}
 		}
 	}
 
-	// Scrollbar: always drawn so the UI layout doesn't jitter; when the
-	// list fits entirely in view the thumb fills the whole track.
-	const int sbX = listX + listW + 6;
-	const int sbY = listY - 1;
-	const int sbH = visibleLines * lineH;
-	const int sbW = 3;
-	fillRect(surf, sbX, sbY, sbW, sbH, kColTrack);
+	// Scrollbar — only when the list can actually scroll.
+	if (L.scrollbar) {
+		fillRect(surf, L.sbX, L.sbY, L.sbW, L.sbH, kColTrack);
 
-	int thumbH;
-	int thumbY;
-	if (count <= visibleLines) {
-		thumbH = sbH;
-		thumbY = sbY;
-	} else {
-		// Thumb size proportional to visible fraction, minimum 6px.
-		thumbH = (sbH * visibleLines) / count;
+		int thumbH = (L.sbH * L.visibleLines) / count;
 		if (thumbH < 6) thumbH = 6;
-		if (thumbH > sbH) thumbH = sbH;
-		const int maxScroll = count - visibleLines;
-		const int maxThumbTravel = sbH - thumbH;
-		thumbY = sbY + (maxThumbTravel * scroll) / (maxScroll > 0 ? maxScroll : 1);
+		if (thumbH > L.sbH) thumbH = L.sbH;
+		const int maxScroll = count - L.visibleLines;
+		const int maxTravel = L.sbH - thumbH;
+		const int thumbY = L.sbY +
+		                   (maxTravel * scroll) /
+		                   (maxScroll > 0 ? maxScroll : 1);
+		fillRect(surf, L.sbX, thumbY, L.sbW, thumbH, kColAccent);
 	}
-	fillRect(surf, sbX, thumbY, sbW, thumbH, kColAccent);
+
+	// Legend below the window. Two columns; each prints as a single
+	// "KEY: ACTION" string with a single space, and column B is a
+	// fixed x-anchor so both lines line up vertically:
+	//
+	//   UP/DOWN: NAVIGATE           PGUP/PGDN: PAGE
+	//   ENTER: LAUNCH               CTRL+ALT+DEL: RESET
+	//
+	// Column A's longest line is "UP/DOWN: NAVIGATE" (17 chars = 102
+	// px). We place column B 20 chars past winX so the gap is at
+	// least 3 chars = 18 px.
+	const int colA = L.winX;
+	const int colB = L.winX + 20 * kGlyphW;
+	drawText(surf, colA, L.legendY,     "UP/DOWN: Navigate",    kColDim);
+	drawText(surf, colB, L.legendY,     "PGUP/PGDN: Page",      kColDim);
+	drawText(surf, colA, L.legendY + 9, "ENTER: Launch",        kColDim);
+	drawText(surf, colB, L.legendY + 9, "CTRL+ALT+DEL: Reset",  kColDim);
 
 	g_system->unlockScreen();
 	g_system->updateScreen();
@@ -443,24 +526,17 @@ int frank_quest_run_selector(const QuestGame *games, int count,
                              int initialIndex) {
 	installPalette();
 
-	// Layout. The backend initializes screen at 320x200.
-	const int listX     = 16;
-	const int listY     = 36;
-	const int listW     = 260;
-	const int lineH     = 10;
-	const int sh        = g_system->getHeight();
-	const int footerY   = sh - 28;
-	int visibleLines    = (footerY - listY) / lineH;
-	if (visibleLines < 1) visibleLines = 1;
+	const int SW = g_system->getWidth();
+	const int SH = g_system->getHeight();
+	Layout L = computeLayout(SW, SH, count);
 
 	int selected = initialIndex;
 	if (selected < 0) selected = 0;
 	if (selected >= count) selected = count > 0 ? count - 1 : 0;
 	int scroll = 0;
-	if (selected >= visibleLines) scroll = selected - visibleLines + 1;
+	if (selected >= L.visibleLines) scroll = selected - L.visibleLines + 1;
 
-	renderFrame(games, count, selected, scroll, visibleLines,
-	            listX, listY, lineH, listW);
+	renderFrame(games, count, selected, scroll, L);
 
 	// Poll events directly from the rp2350 OSystem — EventManager
 	// isn't set up this early and we only need raw key navigation.
@@ -478,17 +554,19 @@ int frank_quest_run_selector(const QuestGame *games, int count,
 
 			switch (ev.kbd.keycode) {
 			case Common::KEYCODE_UP:
-				if (selected > 0) --selected;
+				// Wrap: from item 0, Up goes to the last item.
+				selected = (selected - 1 + count) % count;
 				break;
 			case Common::KEYCODE_DOWN:
-				if (selected < count - 1) ++selected;
+				// Wrap: from last item, Down returns to item 0.
+				selected = (selected + 1) % count;
 				break;
 			case Common::KEYCODE_PAGEUP:
-				selected -= visibleLines;
+				selected -= L.visibleLines;
 				if (selected < 0) selected = 0;
 				break;
 			case Common::KEYCODE_PAGEDOWN:
-				selected += visibleLines;
+				selected += L.visibleLines;
 				if (selected >= count) selected = count - 1;
 				break;
 			case Common::KEYCODE_HOME:
@@ -506,15 +584,14 @@ int frank_quest_run_selector(const QuestGame *games, int count,
 
 			// Keep selection visible.
 			if (selected < scroll) scroll = selected;
-			if (selected >= scroll + visibleLines)
-				scroll = selected - visibleLines + 1;
+			if (selected >= scroll + L.visibleLines)
+				scroll = selected - L.visibleLines + 1;
 
 			if (selected != prevSel || scroll != prevScroll) dirty = true;
 		}
 
 		if (dirty) {
-			renderFrame(games, count, selected, scroll, visibleLines,
-			            listX, listY, lineH, listW);
+			renderFrame(games, count, selected, scroll, L);
 		}
 		g_system->delayMillis(16);
 	}
