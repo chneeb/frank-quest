@@ -61,8 +61,35 @@ project(frank-quest C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
-# Version
-set(CABAL_VERSION "0.1.0")
+# Version — read from version.txt on every configure so bumping the
+# file and rebuilding is enough to pick up the new value. Format is
+# "MAJOR MINOR" (e.g. "1 00" → v1.00, "1 23" → v1.23). MINOR is
+# zero-padded to 2 digits in the displayed form so versions sort
+# cleanly lexicographically.
+file(READ "${CMAKE_CURRENT_LIST_DIR}/version.txt" _frank_version_raw)
+string(STRIP "${_frank_version_raw}" _frank_version_raw)
+string(REPLACE " " ";" _frank_version_list "${_frank_version_raw}")
+list(LENGTH _frank_version_list _frank_version_len)
+if(_frank_version_len LESS 2)
+    message(FATAL_ERROR "version.txt must contain 'MAJOR MINOR' (e.g. '1 00')")
+endif()
+list(GET _frank_version_list 0 FRANK_QUEST_VERSION_MAJOR)
+list(GET _frank_version_list 1 FRANK_QUEST_VERSION_MINOR)
+string(LENGTH "${FRANK_QUEST_VERSION_MINOR}" _frank_minor_len)
+if(_frank_minor_len LESS 2)
+    set(FRANK_QUEST_VERSION "${FRANK_QUEST_VERSION_MAJOR}.0${FRANK_QUEST_VERSION_MINOR}")
+else()
+    set(FRANK_QUEST_VERSION "${FRANK_QUEST_VERSION_MAJOR}.${FRANK_QUEST_VERSION_MINOR}")
+endif()
+# Legacy alias so the CABAL_VERSION compile-define and version.cpp
+# continue to see the same string.
+set(CABAL_VERSION "${FRANK_QUEST_VERSION}")
+message(STATUS "FRANK Quest version: ${FRANK_QUEST_VERSION}")
+
+# Force CMake to re-run when version.txt changes so the compile
+# define stays in sync without `cmake ..` gymnastics.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/version.txt")
 
 # Override pico_malloc BEFORE SDK init: We provide our own __wrap_malloc/calloc/realloc/free
 # that route to PSRAM. The SDK's pico_malloc is guarded by "if (NOT TARGET pico_malloc)".
