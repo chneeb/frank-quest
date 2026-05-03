@@ -29,10 +29,13 @@ void *psram_get_scratch_1(size_t size);
 void *psram_get_scratch_2(size_t size);
 void *psram_get_file_buffer(size_t size);
 
-/* Persistent HDMI framebuffer slot. Returns a fixed PSRAM address
- * that survives psram_reset(), so HDMI DMA can keep scanning it while
- * the rest of the heap is wiped for a return-to-selector transition. */
-void  *psram_get_framebuffer(void);
+/* Persistent HDMI framebuffer slots. Two back-to-back 96 kB blocks at
+ * a fixed PSRAM address that survive psram_reset(). Double buffering
+ * between the two lets the engine write to the back buffer while HDMI
+ * scans the front, preventing tearing and cursor-blink caused by
+ * partial frame writes. */
+void  *psram_get_framebuffer(void);        // buffer 0 (front initially)
+void  *psram_get_framebuffer_back(void);   // buffer 1 (back initially)
 size_t psram_framebuffer_size(void);
 
 void psram_set_temp_mode(int enable);

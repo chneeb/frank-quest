@@ -155,20 +155,20 @@ int main(void) {
     cabal_enable_psram_heap(); // Enable PSRAM for malloc/new heap
     printf("  PSRAM: 8MB at 0x11000000\n");
 
-    // Use the persistent HDMI framebuffer slot, not an mspace alloc.
-    // Single buffer — the double-buffering paths (cabal_swap_buffers,
-    // cabal_get_back_buffer) are legacy stubs nothing in the ScummVM
-    // backend currently calls; OSystem_RP2350 writes directly to the
-    // one HDMI buffer each updateScreen(). A single fixed buffer
-    // lets HDMI keep scanning it during a return-to-selector wipe.
-    printf("Initializing framebuffer...\n");
+    // Use the persistent HDMI framebuffer slots — two 96 kB blocks
+    // back-to-back. Both survive psram_reset(); HDMI keeps scanning
+    // whichever is currently the front buffer while the engine
+    // writes to the back, so a full-screen update never tears and
+    // a cursor draw-on-top can't be caught mid-write by the scanout.
+    printf("Initializing double-buffered framebuffer...\n");
     framebuffer_0 = (uint8_t *)psram_get_framebuffer();
-    framebuffer_1 = framebuffer_0;
+    framebuffer_1 = (uint8_t *)psram_get_framebuffer_back();
     memset(framebuffer_0, 0, CABAL_FRAMEBUFFER_SIZE);
+    memset(framebuffer_1, 0, CABAL_FRAMEBUFFER_SIZE);
     current_framebuffer = framebuffer_0;
     current_buffer_index = 0;
-    printf("  FB: %p (%d bytes, persistent)\n",
-           framebuffer_0, CABAL_FRAMEBUFFER_SIZE);
+    printf("  FB0: %p  FB1: %p  (%d bytes each)\n",
+           framebuffer_0, framebuffer_1, CABAL_FRAMEBUFFER_SIZE);
 
     // Initialize HDMI
     printf("Initializing HDMI...\n");

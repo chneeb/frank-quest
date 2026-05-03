@@ -18,13 +18,11 @@
  * pattern that tripped the XIP bug.
  *
  * Memory layout in the 8 MB PSRAM window:
- *   [0         ..  96 kB)  HDMI framebuffer (persistent across warm
- *                          reset — HDMI DMA keeps scanning this
- *                          region while the mspace is being rebuilt
- *                          for a return-to-selector transition)
- *   [96 kB     .. 128 kB)  reserved
- *   [128       .. 256 kB)  scratch 2 (legacy)
- *   [256       .. 512 kB)  file-load buffer (legacy)
+ *   [0         ..  96 kB)  HDMI framebuffer 0 (persistent across
+ *                          psram_reset; HDMI DMA scans this or fb 1
+ *                          continuously)
+ *   [96        .. 192 kB)  HDMI framebuffer 1 (back buffer)
+ *   [192       .. 512 kB)  reserved (legacy scratch regions, unused)
  *   [512 kB    .. 8 MB)    dlmalloc mspace
  */
 
@@ -444,6 +442,9 @@ void psram_reset(void) {
 #define FRAMEBUFFER_SIZE (96u * 1024u)
 void *psram_get_framebuffer(void) {
     return psram_start;
+}
+void *psram_get_framebuffer_back(void) {
+    return psram_start + FRAMEBUFFER_SIZE;
 }
 size_t psram_framebuffer_size(void) {
     return FRAMEBUFFER_SIZE;
