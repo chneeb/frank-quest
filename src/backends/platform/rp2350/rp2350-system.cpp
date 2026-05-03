@@ -26,6 +26,9 @@ extern "C" {
 }
 #endif
 
+#include "hardware/irq.h"
+#include "hardware/dma.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -513,22 +516,57 @@ bool OSystem_RP2350::pollEvent(Common::Event &event) {
 	}
 }
 
-// Mutex - Dummy implementation (single-threaded)
+// Mutex — audio DMA IRQ guard.
+//
+// We have a single CPU core running engine code, but the I2S audio
+// DMA completes asynchronously and re-enters the mixer callback in
+// IRQ context. Engines (e.g. Gob's AdLib) read and write OPL /
+// mixer state from both contexts, guarded by StackLock on OSystem's
+// mutex. An earlier "no-op" implementation left every such critical
+// section wide open — the mixer IRQ could preempt a register-write
+// half-way and see a partially-updated Channel struct, which caused
+// PC=0 / wild-pointer hardfaults deep inside dbopl (the synthHandler
+// member reads as garbage because the write hasn't finished).
+//
+// The RP2350 has no real mutexes available at this layer (only
+// hardware spinlocks, which don't help against a same-core IRQ).
+// Masking just DMA_IRQ_1 (our audio IRQ line) is enough: nothing
+// else touches the shared state. HDMI runs on DMA_IRQ_0 and stays
+// enabled.
+//
+// The MutexRef holds a nesting counter bit-packed with the previous
+// IRQ-enabled state so recursive locks nest cleanly.
+
+struct CabalMutex {
+	int nesting;
+	bool wasEnabled;
+};
 
 OSystem::MutexRef OSystem_RP2350::createMutex() {
-	return (MutexRef)1;  // Dummy non-null pointer
+	return reinterpret_cast<MutexRef>(new CabalMutex{0, false});
 }
 
 void OSystem_RP2350::lockMutex(MutexRef mutex) {
-	// Single-threaded, no-op
+	auto *m = reinterpret_cast<CabalMutex *>(mutex);
+	if (!m) return;
+	if (m->nesting == 0) {
+		m->wasEnabled = irq_is_enabled(DMA_IRQ_1);
+		if (m->wasEnabled) irq_set_enabled(DMA_IRQ_1, false);
+	}
+	++m->nesting;
 }
 
 void OSystem_RP2350::unlockMutex(MutexRef mutex) {
-	// Single-threaded, no-op
+	auto *m = reinterpret_cast<CabalMutex *>(mutex);
+	if (!m || m->nesting <= 0) return;
+	--m->nesting;
+	if (m->nesting == 0 && m->wasEnabled) {
+		irq_set_enabled(DMA_IRQ_1, true);
+	}
 }
 
 void OSystem_RP2350::deleteMutex(MutexRef mutex) {
-	// Single-threaded, no-op
+	delete reinterpret_cast<CabalMutex *>(mutex);
 }
 
 // Audio
