@@ -55,6 +55,12 @@ int frank_quest_scan_games(QuestGame *out, int maxOut);
 int frank_quest_run_selector(const QuestGame *games, int count,
                              int initialIndex);
 
+// Paint a centered "Loading <game>..." window over the selector. Called
+// immediately before the engine launcher so the user sees feedback
+// while plugins load and the engine spins up. The frame persists on
+// screen until the engine overwrites it with its own first paint.
+void frank_quest_show_loading(const QuestGame &game);
+
 // Scratch-register slot used to persist the selector cursor across warm
 // reboots triggered by Ctrl+Alt+Del. Use slots 6/7 to avoid collision
 // with the crash reporter (0..5) in rp2350-minimal.cpp.

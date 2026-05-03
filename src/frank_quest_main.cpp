@@ -1156,6 +1156,12 @@ extern "C" int cabal_main(void) {
         printf("FRANK Quest: launching %s (engine=%d path=%s)\n",
                g.displayName, (int)g.engine, g.dirPath);
 
+        // Show a "Loading <game>..." window before the engine grabs
+        // the frame. Plugin load + resource parsing takes a few
+        // seconds; without this the HDMI output just sits on the
+        // selector frame and the device looks frozen.
+        frank_quest_show_loading(g);
+
         if (dispatchGame(g)) {
             printf("FRANK Quest: game completed cleanly.\n");
         } else {

@@ -522,6 +522,139 @@ int frank_quest_scan_games(QuestGame *out, int maxOut) {
 	return scanGames(out, maxOut);
 }
 
+void frank_quest_show_loading(const QuestGame &game) {
+	// Paints a centered "Loading <game>..." window on top of whatever
+	// the selector left on screen. Uses the palette slots the selector
+	// already installed so the colors stay consistent. The engine will
+	// repaint the full screen during startup and cover this window —
+	// we just want something to look at during plugin load / resource
+	// parsing so the user doesn't think the device froze.
+
+	Graphics::Surface *surf = g_system->lockScreen();
+	if (!surf || !surf->getPixels()) {
+		if (surf) g_system->unlockScreen();
+		return;
+	}
+
+	const int SW = surf->getWidth();
+	const int SH = surf->getHeight();
+
+	// Dim the background — clear to black.
+	fillRect(surf, 0, 0, SW, SH, kColBg);
+
+	// Word-wrap the game name into up to three lines so long titles
+	// ("Indiana Jones and the Fate of Atlantis", "Legend of Kyrandia 2:
+	// Hand of Fate") fit inside the window instead of being clipped.
+	// Line 1 is always the "Loading" header; lines 2..4 hold wrapped
+	// words from the display name, and a trailing "..." is appended to
+	// whichever line gets the last word.
+	const int pad_x = 10;
+	const int pad_y = 8;
+	const int maxWinW = SW - 40;
+	const int maxLineChars =
+	    (maxWinW - 2 * pad_x) / kGlyphW;  // glyph count per line
+
+	constexpr int kMaxLines = 4;
+	char lines[kMaxLines][64];
+	int  lineCount = 0;
+	int  widestChars = 0;
+
+	auto pushLine = [&](const char *src) {
+		if (lineCount >= kMaxLines) return;
+		strncpy(lines[lineCount], src, sizeof(lines[0]) - 1);
+		lines[lineCount][sizeof(lines[0]) - 1] = 0;
+		const int n = (int)strlen(lines[lineCount]);
+		if (n > widestChars) widestChars = n;
+		++lineCount;
+	};
+
+	pushLine("Loading");
+
+	// Greedy word-wrap over display name, then append "..." to the
+	// final line.
+	const char *p = game.displayName;
+	char cur[64] = {0};
+	int  curLen = 0;
+	while (*p && lineCount < kMaxLines) {
+		// Skip leading spaces.
+		while (*p == ' ') ++p;
+		if (!*p) break;
+
+		// Find next word end.
+		const char *wEnd = p;
+		while (*wEnd && *wEnd != ' ') ++wEnd;
+		const int wLen = (int)(wEnd - p);
+
+		// Does it fit on the current line? (with separating space).
+		const int sepLen = curLen > 0 ? 1 : 0;
+		if (curLen + sepLen + wLen <= maxLineChars) {
+			if (sepLen) cur[curLen++] = ' ';
+			memcpy(cur + curLen, p, wLen);
+			curLen += wLen;
+			cur[curLen] = 0;
+			p = wEnd;
+			continue;
+		}
+
+		// Doesn't fit — flush current line and start a new one. If the
+		// single word is longer than a line (shouldn't happen for game
+		// titles in practice), hard-break it.
+		if (curLen > 0) {
+			pushLine(cur);
+			curLen = 0;
+			cur[0] = 0;
+			continue;
+		}
+		const int take = wLen > maxLineChars ? maxLineChars : wLen;
+		memcpy(cur, p, take);
+		curLen = take;
+		cur[curLen] = 0;
+		p += take;
+	}
+
+	// Append "..." to the last buffered line (or push it alone).
+	if (lineCount < kMaxLines) {
+		const int dotsLen = 3;
+		if (curLen + dotsLen <= maxLineChars) {
+			memcpy(cur + curLen, "...", dotsLen);
+			curLen += dotsLen;
+			cur[curLen] = 0;
+			pushLine(cur);
+		} else {
+			if (curLen > 0) pushLine(cur);
+			if (lineCount < kMaxLines) pushLine("...");
+		}
+	}
+
+	const int lineH = 9;  // 7-px glyph + 2-px leading
+	const int textBlockH = lineCount * lineH - 2;
+
+	int winW = widestChars * kGlyphW + 2 * pad_x;
+	if (winW > maxWinW) winW = maxWinW;
+	const int winH = textBlockH + 2 * pad_y;
+	const int winX = (SW - winW) / 2;
+	const int winY = (SH - winH) / 2;
+
+	// Fill + 1-px accent border.
+	fillRect(surf, winX, winY, winW, winH, kColBg);
+	fillRect(surf, winX,              winY,              winW, 1, kColAccent);
+	fillRect(surf, winX,              winY + winH - 1,   winW, 1, kColAccent);
+	fillRect(surf, winX,              winY,              1,    winH, kColAccent);
+	fillRect(surf, winX + winW - 1,   winY,              1,    winH, kColAccent);
+
+	// Each line is horizontally centered inside the window.
+	for (int i = 0; i < lineCount; ++i) {
+		const int lineChars = (int)strlen(lines[i]);
+		const int lineW     = lineChars * kGlyphW;
+		const int x         = winX + (winW - lineW) / 2;
+		const int y         = winY + pad_y + i * lineH;
+		drawText(surf, x, y, lines[i], kColText);
+	}
+
+	g_system->unlockScreen();
+	g_system->updateScreen();
+}
+
 int frank_quest_run_selector(const QuestGame *games, int count,
                              int initialIndex) {
 	installPalette();
