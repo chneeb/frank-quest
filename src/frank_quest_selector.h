@@ -61,6 +61,11 @@ int frank_quest_run_selector(const QuestGame *games, int count,
 // screen until the engine overwrites it with its own first paint.
 void frank_quest_show_loading(const QuestGame &game);
 
+// Paint the welcome screen with the ASCII logo, version, URL and
+// copyright centered on screen. Blocks until the user presses any
+// key or `timeoutMs` milliseconds elapse. Shown once at cold boot.
+void frank_quest_show_welcome(uint32_t timeoutMs);
+
 // Scratch-register slot used to persist the selector cursor across warm
 // reboots triggered by Ctrl+Alt+Del. Use slots 6/7 to avoid collision
 // with the crash reporter (0..5) in rp2350-minimal.cpp.
