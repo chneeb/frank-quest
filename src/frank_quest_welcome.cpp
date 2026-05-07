@@ -18,10 +18,10 @@
  *      drop shadow.
  *   4. Horizontal sine-wobbled ticker at the bottom.
  *
- * Input is locked until the ticker scrolls fully off-screen, plus a
- * 5-second grace period. This is intentional — the boot intro is meant
- * to play once and not be skippable while the greet text is still
- * scrolling.
+ * Any keypress or mouse-button press dismisses the welcome
+ * immediately. Stale events from boot are drained once at entry so a
+ * buffered press doesn't skip the screen on frame 1. The intro
+ * fall-in, ticker, and outro are all skippable.
  *
  * Font glyphs are traced from frank-msx's ui_font_6x8 (which itself
  * was traced from murmapple's disk_ui), so the title visually matches
@@ -783,18 +783,32 @@ void drawFooter(Graphics::Surface *surf) {
 
 // ---- Input drain --------------------------------------------------
 //
-// We swallow events during the locked phase so the user can mash keys
-// without queueing up a stale press that would dismiss the selector
-// the instant the welcome ends.
-bool drainAndCheckKey(OSystem_RP2350 *sys, bool acceptKeys) {
-	bool gotKey = false;
+// Returns true if the user pressed a key or mouse button this frame,
+// meaning the welcome should be dismissed.
+bool drainAndCheckInput(OSystem_RP2350 *sys) {
+	bool gotInput = false;
 	Common::Event ev;
 	while (sys->pollEvent(ev)) {
-		if (acceptKeys && ev.type == Common::EVENT_KEYDOWN) {
-			gotKey = true;
+		switch (ev.type) {
+		case Common::EVENT_KEYDOWN:
+		case Common::EVENT_LBUTTONDOWN:
+		case Common::EVENT_RBUTTONDOWN:
+		case Common::EVENT_MBUTTONDOWN:
+			gotInput = true;
+			break;
+		default:
+			break;
 		}
 	}
-	return gotKey;
+	return gotInput;
+}
+
+// Swallow any pending events without checking them. Used at startup
+// to clear stale presses queued before the welcome screen took over,
+// so a key buffered during boot doesn't dismiss us instantly.
+void flushPendingEvents(OSystem_RP2350 *sys) {
+	Common::Event ev;
+	while (sys->pollEvent(ev)) { /* discard */ }
 }
 
 } // namespace
@@ -805,6 +819,10 @@ void frank_quest_show_welcome(uint32_t timeoutMs) {
 
 	OSystem_RP2350 *sys = static_cast<OSystem_RP2350 *>(g_system);
 	const uint32_t startMs = g_system->getMillis();
+
+	// Drop anything the input drivers buffered before we got here so
+	// the welcome doesn't dismiss itself on a stale boot-time keypress.
+	flushPendingEvents(sys);
 
 	const int SW = g_system->getWidth();
 
@@ -912,9 +930,11 @@ void frank_quest_show_welcome(uint32_t timeoutMs) {
 		// Exit conditions only meaningful once tickerStartMs is set.
 		if (tickerStartMs != 0 && elapsed >= exitDeadlineMs) break;
 
-		const bool acceptKeys =
-		    (tickerStartMs != 0) && (elapsed >= lockEndMs);
-		if (drainAndCheckKey(sys, acceptKeys)) break;
+		// Any keypress or mouse-button press dismisses the welcome
+		// immediately — including during the intro fall-in. Stale
+		// boot-time events were drained above, so this can't fire on
+		// frame 1 from buffered noise.
+		if (drainAndCheckInput(sys)) break;
 
 		const bool inIntro = (tickerStartMs == 0);
 		const bool inOutro = (tickerStartMs != 0) && (elapsed >= tickerDoneMs);
