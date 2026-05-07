@@ -67,8 +67,8 @@ The active layout drives all GPIO assignments (HDMI, SD, PS/2, I2S, PSRAM CS) vi
 - **8 MB QSPI PSRAM** (mandatory — see below)
 - **HDMI connector** wired through 270 Ω resistors (the RP2350 drives HDMI directly via HSTX)
 - **SD card module** (1-bit SD over PIO, see SD pin map)
-- **PS/2 keyboard and mouse** *(M2 default)* — or —
-- **USB keyboard and mouse** via the native USB port (`usb-hid` build flag)
+- **PS/2 keyboard and mouse** — always available
+- **USB keyboard and mouse** via the native USB port — also available when built with the `usb-hid` flag (PS/2 keeps working alongside it)
 - **I2S DAC module** (e.g. TDA1387, PCM5102) for line-level audio out
 
 > **Note:** USB HID and the USB serial console are mutually exclusive. When `usb-hid` is enabled, the native USB port is used for the host stack and debug logging is rerouted to UART.

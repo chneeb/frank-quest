@@ -19,12 +19,14 @@
 #include <stdio.h>
 #include <string.h>
 
+// PS/2 headers are always included — the driver is always linked so
+// PS/2 input keeps working even when USB HID is enabled in parallel.
+#include "ps2.h"
+#include "ps2kbd_wrapper.h"
+
 #ifdef USB_HID_ENABLED
 #include "usbkbd_wrapper.h"
 #include "usbmouse_wrapper.h"
-#else
-#include "ps2.h"
-#include "ps2kbd_wrapper.h"
 #endif
 
 //============================================================================
@@ -229,17 +231,13 @@ void cabal_system_init(void) {
     // Record start time
     g_state.startTime = time_us_32();
 
-    // Initialize input
-#ifdef USB_HID_ENABLED
-    printf("  Initializing USB HID keyboard...\n");
-    usbkbd_init();
-    printf("  Initializing USB HID mouse...\n");
-    usbmouse_init();
-#else
+    // PS/2 keyboard / mouse always run — they sit on dedicated PIO
+    // state machines (pio0 for kbd, pio1 for mouse) and don't share
+    // hardware with the native USB port. USB HID, when enabled,
+    // layers on top so users can plug either kind of peripheral.
     printf("  Initializing PS/2 keyboard (pio0)...\n");
     ps2kbd_init();
 
-    // Initialize PS/2 mouse using pio1 (keyboard uses pio0)
     printf("  Initializing PS/2 mouse (pio1)...\n");
     if (ps2_mouse_pio_init(pio1, PS2_MOUSE_CLK)) {
         if (ps2_mouse_init_device()) {
@@ -250,6 +248,12 @@ void cabal_system_init(void) {
     } else {
         printf("  PS/2 mouse PIO init failed\n");
     }
+
+#ifdef USB_HID_ENABLED
+    printf("  Initializing USB HID keyboard...\n");
+    usbkbd_init();
+    printf("  Initializing USB HID mouse...\n");
+    usbmouse_init();
 #endif
 
     // Default mouse position
@@ -565,8 +569,10 @@ extern "C" void frank_quest_cad_clear(void) {
 }
 
 #ifdef USB_HID_ENABLED
-// USB HID event polling
-bool cabal_poll_event(CabalEvent *event) {
+// USB HID event polling — when USB HID is enabled, the PS/2 poll
+// path below calls this as a secondary source so a USB keyboard /
+// mouse plugged into the native port works in parallel with PS/2.
+static bool usbhid_poll_event(CabalEvent *event) {
     // Poll USB HID
     usbkbd_tick();
 
@@ -649,18 +655,11 @@ bool cabal_poll_event(CabalEvent *event) {
     event->type = CABAL_EVENT_NONE;
     return false;
 }
+#endif // USB_HID_ENABLED
 
-// Profiling stubs — gob/util.cpp and gob/game.cpp reference these
-// unconditionally for input-latency tracing. The PS/2 branch below
-// provides the real implementation; the USB HID branch returns 0 so
-// the engine still links.
-extern "C" {
-    uint32_t cabal_profile_get_last_click_time(void) { return 0; }
-    uint32_t cabal_profile_get_click_count(void)     { return 0; }
-}
-
-#else
-// Profiling globals - accessible from engine
+// Profiling globals - accessible from engine.
+// gob/util.cpp and gob/game.cpp reference cabal_profile_get_*
+// unconditionally for input-latency tracing.
 static uint32_t g_last_click_time = 0;
 static uint32_t g_click_count = 0;
 static uint32_t g_motion_event_count = 0;
@@ -671,7 +670,9 @@ extern "C" {
     uint32_t cabal_profile_get_click_count(void) { return g_click_count; }
 }
 
-// PS/2 event polling
+// PS/2 event polling — also fans out to USB HID as a secondary
+// source when USB_HID_ENABLED is on, so both input paths work
+// simultaneously.
 bool cabal_poll_event(CabalEvent *event) {
     static uint32_t total_poll_time = 0;
     static uint32_t total_mouse_time = 0;
@@ -819,6 +820,14 @@ bool cabal_poll_event(CabalEvent *event) {
         }
     }
 
+#ifdef USB_HID_ENABLED
+    // Nothing on PS/2 — try USB HID as the secondary source so
+    // a USB keyboard/mouse plugged into the native port still works.
+    if (usbhid_poll_event(event)) {
+        return true;
+    }
+#endif
+
     event->type = CABAL_EVENT_NONE;
 
     // Timing stats
@@ -833,7 +842,6 @@ bool cabal_poll_event(CabalEvent *event) {
 
     return false;
 }
-#endif
 
 //============================================================================
 // Timing
