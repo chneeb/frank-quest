@@ -26,11 +26,13 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Release-wide clock defaults — match build.sh / README "tested" speeds.
+# Release-wide clock defaults. PSRAM stays at 100 MHz for release
+# builds (vs. 133 in build.sh) — 133 is corner-case sensitive to
+# wiring on M1 PCBs, and the perf delta isn't worth field RMAs.
 # Override with env vars for one-off rebuilds, e.g.
-#   RELEASE_CPU_SPEED=252 RELEASE_PSRAM_SPEED=100 ./release.sh
+#   RELEASE_CPU_SPEED=252 RELEASE_PSRAM_SPEED=133 ./release.sh
 RELEASE_CPU_SPEED="${RELEASE_CPU_SPEED:-504}"
-RELEASE_PSRAM_SPEED="${RELEASE_PSRAM_SPEED:-133}"
+RELEASE_PSRAM_SPEED="${RELEASE_PSRAM_SPEED:-100}"
 RELEASE_FLASH_SPEED="${RELEASE_FLASH_SPEED:-66}"
 
 # Build matrix: "board:prefix"

@@ -129,8 +129,12 @@ int main(void) {
     printf("System clock: %lu Hz\n", clock_get_hz(clk_sys));
     printf("\n");
 
-    // Startup delay for USB serial console (cold boot only; return-
-    // to-selector stays in-process so there's no warm boot path).
+    // Startup delay only matters when stdout is USB-CDC: the host has
+    // to re-enumerate after the device renumerates at the overclocked
+    // sysclk before its terminal program latches the new endpoint.
+    // Skip it when the USB port is owned by the HID host stack (no
+    // CDC peer to wait for) — saves ~5 s off cold boot.
+#ifndef USB_HID_ENABLED
     printf("Starting in ");
     for (int i = 5; i > 0; i--) {
         printf("%d...", i);
@@ -138,6 +142,7 @@ int main(void) {
         sleep_ms(1000);
     }
     printf("Go!\n\n");
+#endif
 
     // USB-CDC has had time to reconnect after a watchdog-triggered
     // reboot; now replay any crash record the previous run stashed in
