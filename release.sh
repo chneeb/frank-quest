@@ -128,29 +128,41 @@ for ENTRY in "${BUILD_MATRIX[@]}"; do
     mkdir build
     cd build
 
+    # Capture cmake/make output so failures are debuggable without
+    # re-running the build by hand. Last 40 lines of the failing log
+    # is printed to the terminal; full log is left next to the
+    # release UF2s for forensics.
+    LOG_PATH="$RELEASE_DIR/${OUTPUT_NAME%.uf2}.build.log"
+
     if cmake .. \
         -DPICO_PLATFORM=rp2350 \
         -DBOARD_VARIANT="$BOARD" \
         -DCPU_SPEED="$RELEASE_CPU_SPEED" \
         -DPSRAM_SPEED="$RELEASE_PSRAM_SPEED" \
         -DFLASH_SPEED="$RELEASE_FLASH_SPEED" \
-        -DUSB_HID_ENABLED=ON > /dev/null 2>&1; then
+        -DUSB_HID_ENABLED=ON > "$LOG_PATH" 2>&1; then
 
-        if make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) > /dev/null 2>&1; then
+        if make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) >> "$LOG_PATH" 2>&1; then
             if [[ -f "frank-quest.uf2" ]]; then
                 cp "frank-quest.uf2" "$RELEASE_DIR/$OUTPUT_NAME"
+                rm -f "$LOG_PATH"
                 echo -e "  ${GREEN}✓ $LABEL${NC} → releases/$OUTPUT_NAME"
                 SUCCEEDED+=("$OUTPUT_NAME")
             else
                 echo -e "  ${RED}✗ $LABEL: UF2 not found${NC}"
+                echo -e "  ${YELLOW}  log: $LOG_PATH${NC}"
                 FAILED+=("$LABEL")
             fi
         else
             echo -e "  ${RED}✗ $LABEL: Build failed${NC}"
+            echo -e "  ${YELLOW}  last 40 lines of $LOG_PATH:${NC}"
+            tail -40 "$LOG_PATH" | sed 's/^/    /'
             FAILED+=("$LABEL")
         fi
     else
         echo -e "  ${RED}✗ $LABEL: CMake configure failed${NC}"
+        echo -e "  ${YELLOW}  last 40 lines of $LOG_PATH:${NC}"
+        tail -40 "$LOG_PATH" | sed 's/^/    /'
         FAILED+=("$LABEL")
     fi
 
