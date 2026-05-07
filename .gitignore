@@ -1,6 +1,9 @@
 # Build directory
 build/
 
+# Release UF2 outputs
+releases/
+
 # IDE and editor files
 .vscode/
 .idea/
