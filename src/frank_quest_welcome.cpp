@@ -283,6 +283,40 @@ void installPalette() {
 	g_system->getPaletteManager()->setPalette(pal, 0, kPaletteCount);
 }
 
+// Mountain colors at full opacity (matches installPalette()). Kept in
+// one place so the outro fade has a known starting point.
+constexpr uint8_t kMtnFarRGB[3]  = { 0x40, 0x20, 0x50 };
+constexpr uint8_t kMtnMidRGB[3]  = { 0x20, 0x10, 0x30 };
+constexpr uint8_t kMtnNearRGB[3] = { 0x08, 0x06, 0x18 };
+
+// Fade the three mountain palette slots toward the horizon sky color
+// (the warm band where mountains meet the sky), parameterized by
+// `t` = 0..256 where 0 is fully visible and 256 is fully merged.
+//
+// We bias the target toward the highest sky band (the warm
+// orange/pink near the horizon) so the silhouettes dissolve into the
+// sunset rather than just dimming to black — that's what reads as the
+// mountains "fading away" into the sky.
+void fadeMountains(int t) {
+	if (t < 0)   t = 0;
+	if (t > 256) t = 256;
+	const uint8_t targetR = kSkyKeyR[7];
+	const uint8_t targetG = kSkyKeyG[7];
+	const uint8_t targetB = kSkyKeyB[7];
+
+	auto mix = [&](const uint8_t src[3], uint8_t out[3]) {
+		out[0] = (uint8_t)(src[0] + ((targetR - src[0]) * t) / 256);
+		out[1] = (uint8_t)(src[1] + ((targetG - src[1]) * t) / 256);
+		out[2] = (uint8_t)(src[2] + ((targetB - src[2]) * t) / 256);
+	};
+
+	byte rgb[9];
+	mix(kMtnFarRGB,  rgb + 0);
+	mix(kMtnMidRGB,  rgb + 3);
+	mix(kMtnNearRGB, rgb + 6);
+	g_system->getPaletteManager()->setPalette(rgb, kColMtnFar, 3);
+}
+
 // ---- Low-level draw helpers ---------------------------------------
 
 inline void putPixel(Graphics::Surface *surf, int x, int y, uint8_t color) {
@@ -354,24 +388,6 @@ void drawText(Graphics::Surface *surf, int x, int y, const char *s,
 			}
 		}
 		x += kFontCellW;
-	}
-}
-
-// 2x draw used for the ticker, with optional per-character y offset.
-void drawChar2x(Graphics::Surface *surf, int x, int y, char ch,
-                uint8_t color) {
-	const uint8_t *g = glyph6x8(ch);
-	for (int row = 0; row < kFontCellH; ++row) {
-		const uint8_t bits = g[row];
-		for (int col = 0; col < kFontCellW; ++col) {
-			if (!(bits & (0x80 >> col))) continue;
-			const int px = x + col * 2;
-			const int py = y + row * 2;
-			putPixel(surf, px,     py,     color);
-			putPixel(surf, px + 1, py,     color);
-			putPixel(surf, px,     py + 1, color);
-			putPixel(surf, px + 1, py + 1, color);
-		}
 	}
 }
 
@@ -564,6 +580,15 @@ void buildTitleGradient(uint8_t out[kTitleH]) {
 	}
 }
 
+constexpr int kTitleY0 = 36;
+
+int titleX0(int screenWidth) {
+	const int titleLen = (int)strlen(kTitleText);
+	const int titleW   = titleLen * kFontCellW * kTitleScale;
+	return (screenWidth - titleW) / 2;
+}
+
+// Static (no-physics) title draw — used during the main intro phase.
 void drawTitle(Graphics::Surface *surf) {
 	uint8_t gradient[kTitleH];
 	buildTitleGradient(gradient);
@@ -572,9 +597,8 @@ void drawTitle(Graphics::Surface *surf) {
 	memset(shadow, kColShadow, sizeof(shadow));
 
 	const int titleLen = (int)strlen(kTitleText);
-	const int titleW   = titleLen * kFontCellW * kTitleScale;
-	const int x0       = (surf->getWidth() - titleW) / 2;
-	const int y0       = 36;
+	const int x0       = titleX0(surf->getWidth());
+	const int y0       = kTitleY0;
 
 	// Drop shadow, offset (scale, scale) so it reads at a glance.
 	for (int i = 0; i < titleLen; ++i) {
@@ -588,14 +612,51 @@ void drawTitle(Graphics::Surface *surf) {
 	}
 }
 
+// Falling-title draw. Each character has its own y-offset (positive
+// or negative); spaces are skipped. Glyphs fully off-screen on either
+// the top or bottom edge are simply omitted, so the same renderer
+// works for both the intro (negative offsets falling to 0) and the
+// outro (positive offsets falling past the bottom).
+void drawTitleFalling(Graphics::Surface *surf, const int *yOffset) {
+	uint8_t gradient[kTitleH];
+	buildTitleGradient(gradient);
+
+	uint8_t shadow[kTitleH];
+	memset(shadow, kColShadow, sizeof(shadow));
+
+	const int titleLen = (int)strlen(kTitleText);
+	const int x0       = titleX0(surf->getWidth());
+	const int y0       = kTitleY0;
+	const int sh       = surf->getHeight();
+
+	for (int i = 0; i < titleLen; ++i) {
+		if (kTitleText[i] == ' ') continue;
+		const int gy = y0 + yOffset[i];
+		// Skip glyphs that haven't entered the screen yet (intro) or
+		// have already exited the bottom (outro).
+		if (gy + kTitleH <= 0) continue;
+		if (gy >= sh)          continue;
+
+		const int gx = x0 + i * kFontCellW * kTitleScale;
+		drawGlyphScaled(surf, gx + kTitleScale, gy + kTitleScale,
+		                kTitleText[i], kTitleScale, shadow);
+		drawGlyphScaled(surf, gx, gy, kTitleText[i], kTitleScale, gradient);
+	}
+}
+
 // ---- Ticker -------------------------------------------------------
 //
 // Scrolls a long greet message right-to-left at the bottom of the
 // screen, with a per-character vertical sine bob. Returns true once
 // the whole message has scrolled off the left edge.
 
+// No leading or trailing whitespace padding here — the renderer
+// already places the first character at scrollX=SW (just off-screen
+// right) on frame 0, so leading spaces only add empty scroll time
+// before the user sees anything. Same goes for trailing: the outro
+// already handles the visual exit, so trailing padding just inserts
+// dead air between the last glyph and tickerDoneMs.
 const char *kTickerMsg =
-    "                "
     "WELCOME TO FRANK QUEST FIRMWARE * "
     "THIS IS A PORT OF CABAL PROJECT TO THE RP2350 MICROCONTROLLER * "
     "RUNS SCUMM, SCI, AGI AND OTHER ENGINES * "
@@ -603,47 +664,84 @@ const char *kTickerMsg =
     "COPY ALL GAMES TO \"QUEST\" DIR ON MICROSD CARD, "
     "INSERT INTO YOUR BOARD AND REBOOT * "
     "GREETINGS TO MURMULATOR COMMUNITY * "
-    "DNCRAPTOR, WE PROBABLY NEED VGA AND PWM FOR THIS PORT :)"
-    "                ";
+    "DNCRAPTOR, WE PROBABLY NEED VGA AND PWM FOR THIS PORT :)";
 
 constexpr int kTickerScale     = 2;
 constexpr int kTickerCharW     = kFontCellW * kTickerScale;   // 12
 constexpr int kTickerCharH     = kFontCellH * kTickerScale;   // 16
 constexpr int kTickerY         = 178;                         // baseline-ish
-constexpr int kTickerWobbleAmp = 3;                           // pixels
-constexpr int kTickerPxPerSec  = 90;                          // scroll speed
+constexpr int kTickerWobbleAmp = 2;                           // peak ≈ ±2 px
+// 60 px/s lands on exactly 1 px/frame at the 60 Hz frame target — the
+// smoothest motion achievable with binary glyphs (no anti-aliasing).
+constexpr int kTickerPxPerSec  = 60;
+// Phase step per screen column. 256-entry sin table, step 3 → 85-px
+// wavelength. Long enough that the slope is gentle (≈ amp*2π/85
+// ≈ 0.37 px per screen px), which spaces the unavoidable 1-px
+// stair-steps ~3 columns apart so the eye reads them as a continuous
+// wave instead of as ladders.
+constexpr int kSineScrollPxStep = 3;
 
+// Underline glow band, drawn between [x0, x1) on the screen. Used for
+// three phases:
+//   intro draw-in  : [0, lineRight) where lineRight grows 0→SW
+//   steady state   : [0, SW)
+//   outro wipe-out : [wipeX, SW) where wipeX grows 0→SW
+void drawGlowLine(Graphics::Surface *surf, int x0, int x1) {
+	const int SW = surf->getWidth();
+	if (x0 < 0)  x0 = 0;
+	if (x1 > SW) x1 = SW;
+	if (x1 <= x0) return;
+	const int y = kTickerY + kTickerCharH + 1;
+	hline(surf, x0, y, x1 - x0, kColTickerGlow);
+}
+
+// Sinescroll renderer. Per-pixel-column vertical offset means the
+// wobble is spatially continuous across the entire ticker — no per-
+// glyph quantization steps. The wave moves over time because the
+// phase advances with elapsedMs, so a given character undulates
+// vertically as it scrolls through the screen-fixed wave.
 void drawTicker(Graphics::Surface *surf, uint32_t elapsedMs) {
 	const int SW     = surf->getWidth();
 	const int msgLen = (int)strlen(kTickerMsg);
 
-	// Scroll position is derived from elapsed wall-clock time so motion
-	// stays smooth even when frame intervals jitter (the only thing
-	// frame-rate jitter can do here is add per-frame quantization noise
-	// — at the same effective speed).
-	//
-	// At t=0 the first char sits at x=SW (just off-screen right) and
-	// advances left at kTickerPxPerSec.
+	// At t=0 the first char sits at x=SW and advances left.
 	const int scroll  = (int)((int64_t)elapsedMs * kTickerPxPerSec / 1000);
 	const int scrollX = SW - scroll;
 
-	// Underline glow band — gives the ticker some depth without an
-	// extra drawing pass per pixel.
-	hline(surf, 0, kTickerY + kTickerCharH + 1, SW, kColTickerGlow);
-
-	// Wobble phase also wall-clock driven so the bob speed is stable.
-	const int wobblePhase = (int)((int64_t)elapsedMs * 240 / 1000);
+	// Wobble phase is wall-clock driven so the wave rate stays
+	// constant regardless of frame jitter. 480 = 2× the original 240
+	// rate — gives the wave a more energetic bob without retuning
+	// amplitude or wavelength.
+	const int wobblePhase = (int)((int64_t)elapsedMs * 480 / 1000);
 
 	for (int i = 0; i < msgLen; ++i) {
 		const int cx = scrollX + i * kTickerCharW;
-		// Quick reject: glyph fully off-screen.
 		if (cx + kTickerCharW < 0)   continue;
 		if (cx >= SW)                continue;
 
-		const int wob = (isin(wobblePhase + i * 24) * kTickerWobbleAmp) / 128;
-		const int cy  = kTickerY + wob;
+		const uint8_t *gly = glyph6x8(kTickerMsg[i]);
+		for (int row = 0; row < kFontCellH; ++row) {
+			const uint8_t bits = gly[row];
+			for (int col = 0; col < kFontCellW; ++col) {
+				if (!(bits & (0x80 >> col))) continue;
+				const int px = cx + col * kTickerScale;
 
-		drawChar2x(surf, cx, cy, kTickerMsg[i], kColTicker);
+				// Sample the sine wave at this screen column. With
+				// kTickerScale=2 we shift both columns of a glyph
+				// pixel by the same y so the 2x scale stays clean —
+				// otherwise a single glyph pixel could split across
+				// two y values and look torn.
+				const int sxKey = px & ~1;
+				const int wob   = (isin(wobblePhase + sxKey * kSineScrollPxStep) *
+				                   kTickerWobbleAmp) / 128;
+				const int py    = kTickerY + wob + row * kTickerScale;
+
+				putPixel(surf, px,     py,     kColTicker);
+				putPixel(surf, px + 1, py,     kColTicker);
+				putPixel(surf, px,     py + 1, kColTicker);
+				putPixel(surf, px + 1, py + 1, kColTicker);
+			}
+		}
 	}
 }
 
@@ -710,43 +808,281 @@ void frank_quest_show_welcome(uint32_t timeoutMs) {
 
 	const int SW = g_system->getWidth();
 
-	// Hold input until the ticker scrolls fully off-screen + 5 s grace.
-	// Both the ticker animation and this lock are driven by wall-clock
-	// time, so they can't drift apart due to frame-rate jitter.
-	const uint32_t lockEndMs = tickerDurationMs(SW) + 5000u;
+	// Phase boundaries:
+	//   intro            : runs until every title glyph reaches rest.
+	//                      End time (`tickerStartMs`) is determined
+	//                      dynamically by the physics simulation — not
+	//                      a fixed timer — so the ticker always begins
+	//                      the moment the last glyph settles, no
+	//                      matter how the bounce parameters change.
+	//   main             : tickerStartMs..tickerDoneMs (ticker scrolling)
+	//   outro            : tickerDoneMs..tickerDoneMs + 5000
+	//   input accepted   : t >= lockEndMs
+	//
+	// Hard upper bound on intro length so we can't ever stall here if
+	// physics goes weird (e.g. low-FPS environment shifts integration).
+	constexpr uint32_t kIntroMaxMs = 4000;
+	uint32_t tickerStartMs = 0;          // 0 = not started yet
+	uint32_t tickerDoneMs  = 0;
+	uint32_t lockEndMs     = 0;
+	uint32_t exitDeadlineMs = 0;
 
-	// Honor the caller's timeout, but never auto-dismiss while we're
-	// still inside the locked phase.
-	const uint32_t exitDeadlineMs =
-	    (timeoutMs > lockEndMs) ? timeoutMs : lockEndMs;
+	// Intro timing (ms from startMs). Mirrors the outro structure but
+	// reversed: line and mountains build up, title falls in from above.
+	constexpr uint32_t kIntroLineStart    = 0;
+	constexpr uint32_t kIntroLineDuration = 400;
+	constexpr uint32_t kIntroFadeStart    = 100;
+	constexpr uint32_t kIntroFadeDuration = 1100;
+	constexpr uint32_t kIntroFallStart    = 150;
+
+	// Outro timing (ms from tickerDoneMs).
+	constexpr uint32_t kOutroLineStart    = 0;
+	constexpr uint32_t kOutroLineDuration = 400;
+	constexpr uint32_t kOutroFadeStart    = 300;
+	constexpr uint32_t kOutroFadeDuration = 1800;
+	constexpr uint32_t kOutroFallStart    = 700;
+
+	// Title physics state — shared between intro fall-in and outro
+	// fall-out. Intro starts each glyph far above its rest position
+	// with downward velocity; gravity carries it to y=0 (rest) where
+	// it bounces a couple of times then locks. Outro re-uses the same
+	// arrays starting from rest, with gravity dropping it past the
+	// bottom edge.
+	const int titleLen      = (int)strlen(kTitleText);
+	int titleYOffset[32]    = { 0 };   // vertical displacement (px)
+	int titleVel[32]        = { 0 };   // velocity in 8.8 fixed (px/frame << 8)
+	bool titleStarted[32]   = { false };
+	bool titleSettled[32]   = { false };  // intro: true once landed at rest
+	bool outroStarted[32]   = { false };
+
+	const uint8_t kStaggerMs = 40;
+	const uint8_t kSeedRng[16] = {
+	    13, 5, 21, 9, 27, 17, 3, 31, 11, 25, 7, 19, 1, 29, 15, 23
+	};
+
+	// Initial intro state: every non-space glyph starts well above the
+	// top of the screen with a fixed downward velocity. Each glyph
+	// activates after its stagger delay; until then it just sits
+	// off-screen and isn't drawn.
+	for (int i = 0; i < titleLen; ++i) {
+		if (kTitleText[i] == ' ') continue;
+		titleYOffset[i] = -(kTitleY0 + kTitleH + 8);   // off-screen above
+	}
+
+	// Glow line bounds — recomputed every frame from the phase clock.
+	int lineX0 = 0;       // left edge
+	int lineX1 = 0;       // right edge
+
+	// Currently-applied mountain fade level (0 = full mountains, 256 =
+	// fully dissolved). Set initially to 256 so installPalette()'s
+	// resting mountain colors get overwritten by the intro fade-in's
+	// first frame.
+	int lastFadeT = -1;
+	fadeMountains(256);
+	lastFadeT = 256;
+
+	constexpr uint32_t kFrameMs = 16;
+	uint32_t nextFrameMs = g_system->getMillis();
 
 	while (true) {
-		const uint32_t elapsed = g_system->getMillis() - startMs;
-		if (elapsed >= exitDeadlineMs) break;
+		const uint32_t now     = g_system->getMillis();
+		const uint32_t elapsed = now - startMs;
 
-		const bool acceptKeys = (elapsed >= lockEndMs);
+		// Once intro completes (all glyphs settled or upper bound
+		// hit), latch the downstream phase boundaries.
+		if (tickerStartMs == 0) {
+			bool allSettled = true;
+			for (int i = 0; i < titleLen; ++i) {
+				if (kTitleText[i] == ' ')   continue;
+				if (!titleSettled[i])       { allSettled = false; break; }
+			}
+			// Don't latch until the fall has actually started — at
+			// t=0 every glyph is "not yet active" and would falsely
+			// look settled.
+			const bool fallActive = elapsed >= kIntroFallStart;
+			if ((allSettled && fallActive) || elapsed >= kIntroMaxMs) {
+				tickerStartMs  = elapsed;
+				tickerDoneMs   = tickerStartMs + tickerDurationMs(SW);
+				lockEndMs      = tickerDoneMs + 5000u;
+				exitDeadlineMs =
+				    (timeoutMs > lockEndMs) ? timeoutMs : lockEndMs;
+			}
+		}
+
+		// Exit conditions only meaningful once tickerStartMs is set.
+		if (tickerStartMs != 0 && elapsed >= exitDeadlineMs) break;
+
+		const bool acceptKeys =
+		    (tickerStartMs != 0) && (elapsed >= lockEndMs);
 		if (drainAndCheckKey(sys, acceptKeys)) break;
+
+		const bool inIntro = (tickerStartMs == 0);
+		const bool inOutro = (tickerStartMs != 0) && (elapsed >= tickerDoneMs);
+		const uint32_t introT = elapsed;
+		const uint32_t outroT = inOutro ? (elapsed - tickerDoneMs) : 0;
+
+		// ---- Glow line --------------------------------------------
+		// Intro: draws in from left, [0, lineRight) where lineRight
+		// grows 0→SW.
+		// Steady: full width.
+		// Outro: wipes off to the right, [wipeX, SW).
+		if (inIntro) {
+			lineX0 = 0;
+			if (introT < kIntroLineStart) {
+				lineX1 = 0;
+			} else {
+				const uint32_t dt = introT - kIntroLineStart;
+				lineX1 = dt >= kIntroLineDuration
+				          ? SW
+				          : (int)((int64_t)dt * SW / kIntroLineDuration);
+			}
+		} else if (inOutro) {
+			lineX1 = SW;
+			if (outroT < kOutroLineStart) {
+				lineX0 = 0;
+			} else {
+				const uint32_t dt = outroT - kOutroLineStart;
+				lineX0 = dt >= kOutroLineDuration
+				          ? SW
+				          : (int)((int64_t)dt * SW / kOutroLineDuration);
+			}
+		} else {
+			lineX0 = 0;
+			lineX1 = SW;
+		}
+
+		// ---- Mountain fade ----------------------------------------
+		// Intro: 256 (sky color) → 0 (full mountains).
+		// Steady: 0.
+		// Outro: 0 → 256.
+		int fadeT = 0;
+		if (inIntro) {
+			if (introT < kIntroFadeStart) {
+				fadeT = 256;
+			} else {
+				const uint32_t dt = introT - kIntroFadeStart;
+				fadeT = dt >= kIntroFadeDuration
+				          ? 0
+				          : 256 - (int)((int64_t)dt * 256 / kIntroFadeDuration);
+			}
+		} else if (inOutro && outroT >= kOutroFadeStart) {
+			const uint32_t dt = outroT - kOutroFadeStart;
+			fadeT = dt >= kOutroFadeDuration
+			          ? 256
+			          : (int)((int64_t)dt * 256 / kOutroFadeDuration);
+		}
+		if (fadeT != lastFadeT) {
+			fadeMountains(fadeT);
+			lastFadeT = fadeT;
+		}
+
+		// ---- Title physics ----------------------------------------
+		// Intro fall-in: glyphs descend from off-screen-top, hit y=0,
+		// bounce once with damped velocity, then settle.
+		if (inIntro && introT >= kIntroFallStart) {
+			const uint32_t dt = introT - kIntroFallStart;
+			for (int i = 0; i < titleLen; ++i) {
+				if (kTitleText[i] == ' ') continue;
+				if (titleSettled[i])      continue;
+
+				const uint32_t startDelay = (uint32_t)i * kStaggerMs;
+				if (!titleStarted[i] && dt >= startDelay) {
+					titleStarted[i] = true;
+					// Per-character variation so the row doesn't drop
+					// in lockstep — a small extra downward kick.
+					titleVel[i] = (kSeedRng[i & 15] & 0x07) << 6;
+				}
+				if (!titleStarted[i]) continue;
+
+				// Gravity 0.45 px/frame² in 8.8 fixed.
+				titleVel[i] += 115;
+				titleYOffset[i] += titleVel[i] >> 8;
+
+				// Bounce on rest line. Reflect velocity with 65%
+				// energy loss until the bounce becomes imperceptible
+				// (< ~1 px), then settle cleanly. Higher loss + larger
+				// snap threshold collapses the bounce tail to 2–3
+				// rebounds (≈250 ms) instead of 5–6 (≈800 ms) —
+				// preserves the bouncy feel while letting the ticker
+				// start much sooner after the title lands.
+				if (titleYOffset[i] >= 0) {
+					if (titleVel[i] < 256) {
+						titleYOffset[i] = 0;
+						titleVel[i]     = 0;
+						titleSettled[i] = true;
+					} else {
+						titleYOffset[i] = -titleYOffset[i];
+						titleVel[i]     = -(titleVel[i] * 35 / 100);
+					}
+				}
+			}
+		}
+
+		// Outro fall-out: same physics arrays, but reset to rest at
+		// the moment we cross into the outro phase, then accelerate
+		// downward indefinitely.
+		if (inOutro && outroT >= kOutroFallStart) {
+			const uint32_t dt = outroT - kOutroFallStart;
+			for (int i = 0; i < titleLen; ++i) {
+				if (kTitleText[i] == ' ') continue;
+				const uint32_t startDelay = (uint32_t)i * kStaggerMs;
+				if (!outroStarted[i] && dt >= startDelay) {
+					outroStarted[i] = true;
+					// Reset to rest in case intro physics left a
+					// residual offset, then add an upward kick like
+					// before so the column doesn't drop in lockstep.
+					titleYOffset[i] = 0;
+					titleVel[i]     = -((kSeedRng[i & 15] & 0x07) << 6);
+				}
+				if (!outroStarted[i]) continue;
+
+				titleVel[i] += 115;
+				titleYOffset[i] += titleVel[i] >> 8;
+			}
+		}
 
 		Graphics::Surface *surf = g_system->lockScreen();
 		if (!surf || !surf->getPixels()) {
 			if (surf) g_system->unlockScreen();
-			g_system->delayMillis(16);
+			g_system->delayMillis(kFrameMs);
+			nextFrameMs = g_system->getMillis() + kFrameMs;
 			continue;
 		}
 
 		drawSky(surf);
 		drawMountains(surf, elapsed);
-		drawTitle(surf);
-		drawFooter(surf);
 
-		// Ticker draws last so it's always on top of the mountains.
-		// After the message scrolls off, every glyph early-rejects and
-		// only the underline glow keeps painting.
-		drawTicker(surf, elapsed);
+		// Title: falling renderer during intro & outro phases (handles
+		// off-screen culling either side); static otherwise.
+		if (inIntro || (inOutro && outroT >= kOutroFallStart)) {
+			drawTitleFalling(surf, titleYOffset);
+		} else {
+			drawTitle(surf);
+		}
+
+		// Footer is hidden during the intro so it doesn't pop in
+		// before the title has settled. Visible everywhere else.
+		if (!inIntro) {
+			drawFooter(surf);
+		}
+		drawGlowLine(surf, lineX0, lineX1);
+
+		// Ticker text paints only during the main phase, between the
+		// intro and outro. Its scroll clock is reset to 0 at
+		// tickerStartMs so the message starts fully off-screen.
+		if (!inIntro && !inOutro) {
+			drawTicker(surf, elapsed - tickerStartMs);
+		}
 
 		g_system->unlockScreen();
 		g_system->updateScreen();
 
-		g_system->delayMillis(16);
+		nextFrameMs += kFrameMs;
+		const uint32_t after = g_system->getMillis();
+		if ((int32_t)(nextFrameMs - after) > 0) {
+			g_system->delayMillis(nextFrameMs - after);
+		} else {
+			nextFrameMs = after;
+		}
 	}
 }
