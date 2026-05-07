@@ -650,6 +650,15 @@ bool cabal_poll_event(CabalEvent *event) {
     return false;
 }
 
+// Profiling stubs — gob/util.cpp and gob/game.cpp reference these
+// unconditionally for input-latency tracing. The PS/2 branch below
+// provides the real implementation; the USB HID branch returns 0 so
+// the engine still links.
+extern "C" {
+    uint32_t cabal_profile_get_last_click_time(void) { return 0; }
+    uint32_t cabal_profile_get_click_count(void)     { return 0; }
+}
+
 #else
 // Profiling globals - accessible from engine
 static uint32_t g_last_click_time = 0;
