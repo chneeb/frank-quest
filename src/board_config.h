@@ -17,8 +17,8 @@
 /*
  * Board Configuration Variants for FRANK Quest (ScummVM port for RP2350)
  *
- * BOARD_M1 - M1 GPIO layout (default)
- * BOARD_M2 - M2 GPIO layout
+ * BOARD_M1 - M1 GPIO layout
+ * BOARD_M2 - M2 GPIO layout (default)
  *
  * PSRAM pin is auto-detected based on chip package:
  *   RP2350B: GPIO47 (for both M1 and M2)
@@ -46,7 +46,7 @@
 
 // Default to M1 if no config specified
 #if !defined(BOARD_M1) && !defined(BOARD_M2)
-#define BOARD_M1
+#define BOARD_M2
 #endif
 
 //=============================================================================

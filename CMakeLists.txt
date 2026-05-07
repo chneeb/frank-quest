@@ -11,8 +11,8 @@ cmake_minimum_required(VERSION 3.13)
 # Set board to Pico 2 (RP2350)
 set(PICO_BOARD pico2 CACHE STRING "Pico board type")
 
-# Board configuration variant (M1, M2) - M1 is default
-set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
+# Board configuration variant (M1, M2) - M2 is default
+set(BOARD_VARIANT "M2" CACHE STRING "Board variant: M1 or M2")
 
 # USB HID disabled by default (use USB serial console for debug)
 option(USB_HID_ENABLED "Enable USB HID for keyboard/mouse" OFF)
