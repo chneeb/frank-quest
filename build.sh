@@ -9,6 +9,7 @@
 #
 # Usage: ./build.sh [BOARD] [CPU_MHZ] [PSRAM_MHZ] [FLASH_MHZ] [usb-hid] [clean]
 # Defaults: M2 504 133 66
+# BOARD is M1, M2 or PICOCALC (M4 is accepted as an alias for PICOCALC).
 
 set -e
 
@@ -31,10 +32,16 @@ CPU="${POS[1]:-504}"
 PSRAM="${POS[2]:-133}"
 FLASH="${POS[3]:-66}"
 
+# M4 is the shorthand that grew alongside M1/M2; PICOCALC is the real name and
+# the macro the sources test, so normalise before validating.
+if [[ "$BOARD" == "M4" || "$BOARD" == "picocalc" ]]; then
+    BOARD="PICOCALC"
+fi
+
 # Validate board variant
-if [[ "$BOARD" != "M1" && "$BOARD" != "M2" ]]; then
+if [[ "$BOARD" != "M1" && "$BOARD" != "M2" && "$BOARD" != "PICOCALC" ]]; then
     echo "Invalid board variant: $BOARD"
-    echo "Usage: $0 [M1|M2] [CPU_MHZ] [PSRAM_MHZ] [FLASH_MHZ] [usb-hid] [clean]"
+    echo "Usage: $0 [M1|M2|PICOCALC] [CPU_MHZ] [PSRAM_MHZ] [FLASH_MHZ] [usb-hid] [clean]"
     echo "  CPU_MHZ:   252, 378, 504  (default: 504)"
     echo "  PSRAM_MHZ: 84, 100, 133, 166  (default: 133)"
     echo "  FLASH_MHZ: flash QMI cap in MHz  (default: 66)"
@@ -52,7 +59,12 @@ if [[ "$USB_HID" == "1" ]]; then
 else
     echo "  Input: PS/2 keyboard/mouse (USB serial console)"
 fi
-echo "  Audio: I2S"
+if [[ "$BOARD" == "PICOCALC" ]]; then
+    echo "  Audio: I2S (placeholder pins; PWM audio not implemented)"
+    echo "  Video: none (SPI LCD driver not implemented)"
+else
+    echo "  Audio: I2S"
+fi
 echo ""
 
 # Clean if requested

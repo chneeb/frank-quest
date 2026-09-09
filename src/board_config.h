@@ -17,12 +17,13 @@
 /*
  * Board Configuration Variants for FRANK Quest (ScummVM port for RP2350)
  *
- * BOARD_M1 - M1 GPIO layout
- * BOARD_M2 - M2 GPIO layout (default)
+ * BOARD_M1       - M1 GPIO layout
+ * BOARD_M2       - M2 GPIO layout (default)
+ * BOARD_PICOCALC - ClockworkPi PicoCalc (build.sh also accepts M4 as an alias)
  *
  * PSRAM pin is auto-detected based on chip package:
- *   RP2350B: GPIO47 (for both M1 and M2)
- *   RP2350A: GPIO19 (M1) or GPIO8 (M2)
+ *   RP2350B: GPIO47 (for M1, M2 and PicoCalc)
+ *   RP2350A: GPIO19 (M1) or GPIO8 (M2); N/A on PicoCalc (Pico Plus 2 is a B)
  *
  * M1 GPIO Layout:
  *   HDMI: CLKN=6, CLKP=7, D0N=8, D0P=9, D1N=10, D1P=11, D2N=12, D2P=13
@@ -38,14 +39,21 @@
  *   PS/2 Mouse: CLK=0, DATA=1
  *   I2S:  DATA=9, CLK=10, LRCK=11
  *
+ * PicoCalc GPIO Layout (Pimoroni Pico Plus 2 in the PicoCalc's Pico bay):
+ *   TFT:  spi1 SCK=10, MOSI=11, MISO=12, CS=13, DC=14, RST=15
+ *   KBD:  i2c1 SDA=6, SCL=7 (STM32 keyboard MCU at 0x1F)
+ *   SD:   spi0 MISO=16, CS=17, SCK=18, MOSI=19
+ *   Audio: PWM L=26, R=27
+ *   No HDMI, no PS/2. See PICOCALC_PORT.md.
+ *
  * CPU/PSRAM Speed (set via CMake -DCPU_SPEED=xxx -DPSRAM_SPEED=xxx):
  *   252 MHz - no overclock (default for stable operation)
  *   378 MHz - medium overclock
  *   504 MHz - high overclock
  */
 
-// Default to M1 if no config specified
-#if !defined(BOARD_M1) && !defined(BOARD_M2)
+// Default to M2 if no config specified
+#if !defined(BOARD_M1) && !defined(BOARD_M2) && !defined(BOARD_PICOCALC)
 #define BOARD_M2
 #endif
 
@@ -69,8 +77,12 @@
 //=============================================================================
 
 // PSRAM pin for RP2350A variants
-#ifdef BOARD_M1
+#if defined(BOARD_M1)
 #define PSRAM_PIN_RP2350A 19
+#elif defined(BOARD_PICOCALC)
+// The Pico Plus 2 is always an RP2350B with on-package PSRAM on QMI CS1, so
+// this branch is unreachable there; defined only to keep the macro total.
+#define PSRAM_PIN_RP2350A 47
 #else
 #define PSRAM_PIN_RP2350A 8
 #endif
@@ -164,6 +176,49 @@ static inline uint get_psram_pin(void) {
 #define I2S_CLOCK_PIN_BASE 10
 
 #endif // BOARD_M2
+
+//=============================================================================
+// PicoCalc Layout Configuration
+//=============================================================================
+#ifdef BOARD_PICOCALC
+
+// No HDMI on PicoCalc: the panel is SPI. HDMI_PIN_* are left undefined, so
+// HDMI.h falls back to its own HDMI_BASE_PIN of 6 and drivers/HDMI.c still
+// compiles. Those pins are never driven because main.c does not call
+// graphics_init() on this board -- there is no HDMI to bring up, and 6/7 are
+// the keyboard's I2C lines here. Removing HDMI.c from the build is step 2,
+// once the LCD driver provides the graphics_* API in its place.
+
+// TFT panel (ILI9488-class 320x320) on spi1
+#define LCD_SPI_PORT   spi1
+#define LCD_PIN_SCK    10
+#define LCD_PIN_MOSI   11
+#define LCD_PIN_MISO   12
+#define LCD_PIN_CS     13
+#define LCD_PIN_DC     14
+#define LCD_PIN_RST    15
+
+// Keyboard MCU on i2c1
+#define PICOCALC_KBD_I2C_PORT i2c1
+#define PICOCALC_KBD_SDA_PIN  6
+#define PICOCALC_KBD_SCL_PIN  7
+#define PICOCALC_KBD_ADDR     0x1F
+
+// SD Card (spi0; hardware-SPI0 function pins)
+#define SDCARD_PIN_CLK    18
+#define SDCARD_PIN_CMD    19
+#define SDCARD_PIN_D0     16
+#define SDCARD_PIN_D3     17
+
+// PWM Audio
+#define PICOCALC_AUDIO_PIN_L 26
+#define PICOCALC_AUDIO_PIN_R 27
+
+// No PS/2 on PicoCalc. PS2_PIN_* / PS2_MOUSE_* stay undefined; the PS/2 init
+// calls are compiled out instead (see rp2350-minimal.cpp, ps2kbd_wrapper.cpp),
+// which also leaves PIO0 free for the LCD.
+
+#endif // BOARD_PICOCALC
 
 //=============================================================================
 // Display Configuration

@@ -180,10 +180,17 @@ static Ps2Kbd_Mrmltr* kbd = nullptr;
 alignas(Ps2Kbd_Mrmltr) static uint8_t kbd_storage[sizeof(Ps2Kbd_Mrmltr)];
 
 extern "C" void ps2kbd_init(void) {
+#ifdef BOARD_PICOCALC
+    // PicoCalc has no PS/2 header; its keyboard is an I2C MCU. Leave pio0 and
+    // the GPIOs alone. The rest of this file stays compiled so the event ring
+    // and the ps2kbd_* entry points the backend calls remain available.
+    return;
+#else
     if (kbd) return;  // already initialized — PIO SM and program are retained
     // PS2 keyboard driver expects base_gpio as CLK, and base_gpio+1 as DATA
     kbd = new (kbd_storage) Ps2Kbd_Mrmltr(pio0, PS2_PIN_CLK, key_handler);
     kbd->init_gpio();
+#endif
 }
 
 extern "C" void ps2kbd_tick(void) {

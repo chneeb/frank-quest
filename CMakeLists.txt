@@ -11,8 +11,12 @@ cmake_minimum_required(VERSION 3.13)
 # Set board to Pico 2 (RP2350)
 set(PICO_BOARD pico2 CACHE STRING "Pico board type")
 
-# Board configuration variant (M1, M2) - M2 is default
-set(BOARD_VARIANT "M2" CACHE STRING "Board variant: M1 or M2")
+# Board configuration variant (M1, M2, PICOCALC) - M2 is default
+set(BOARD_VARIANT "M2" CACHE STRING "Board variant: M1, M2 or PICOCALC")
+
+if(NOT BOARD_VARIANT MATCHES "^(M1|M2|PICOCALC)$")
+    message(FATAL_ERROR "Unknown BOARD_VARIANT '${BOARD_VARIANT}' (expected M1, M2 or PICOCALC)")
+endif()
 
 # USB HID disabled by default (use USB serial console for debug)
 option(USB_HID_ENABLED "Enable USB HID for keyboard/mouse" OFF)
@@ -860,6 +864,20 @@ elseif(BOARD_VARIANT STREQUAL "M2")
         SDCARD_PIN_SPI0_SCK=6
         SDCARD_PIN_SPI0_MOSI=7
         SDCARD_PIN_SPI0_MISO=4
+    )
+elseif(BOARD_VARIANT STREQUAL "PICOCALC")
+    target_compile_definitions(frank-quest PRIVATE
+        # I2S Audio -- PicoCalc has no I2S DAC; audio is PWM on 26/27 and that
+        # driver is step 6 of PICOCALC_PORT.md. Until then the I2S driver is
+        # still linked and initialised, so park it on pins that are free on
+        # this board rather than letting it default onto 26/27 or the TFT.
+        PICO_AUDIO_I2S_DATA_PIN=8
+        PICO_AUDIO_I2S_CLOCK_PIN_BASE=20
+        # SD Card (spi0)
+        SDCARD_PIN_SPI0_CS=17
+        SDCARD_PIN_SPI0_SCK=18
+        SDCARD_PIN_SPI0_MOSI=19
+        SDCARD_PIN_SPI0_MISO=16
     )
 endif()
 

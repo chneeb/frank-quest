@@ -231,6 +231,12 @@ void cabal_system_init(void) {
     // Record start time
     g_state.startTime = time_us_32();
 
+#ifdef BOARD_PICOCALC
+    // No PS/2 on PicoCalc: the keyboard is an I2C MCU (driver not written yet,
+    // see PICOCALC_PORT.md step 4) and there is no pointing device at all.
+    // Until then USB HID is the only input path on this board.
+    printf("  PS/2 skipped (PicoCalc: I2C keyboard, no PS/2)\n");
+#else
     // PS/2 keyboard / mouse always run — they sit on dedicated PIO
     // state machines (pio0 for kbd, pio1 for mouse) and don't share
     // hardware with the native USB port. USB HID, when enabled,
@@ -248,6 +254,7 @@ void cabal_system_init(void) {
     } else {
         printf("  PS/2 mouse PIO init failed\n");
     }
+#endif
 
 #ifdef USB_HID_ENABLED
     printf("  Initializing USB HID keyboard...\n");
