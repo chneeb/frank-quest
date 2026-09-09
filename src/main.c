@@ -93,9 +93,6 @@ static void __no_inline_not_in_flash_func(set_flash_timings)(int cpu_mhz) {
 #endif
 
 int main(void) {
-    // Voltage and clock setup MUST happen before stdio_init_all()
-    // USB needs to initialize at the target clock speed
-
     // Overclock setup MUST happen before stdio_init_all()
     // USB needs to initialize at the target clock speed
 #if CPU_CLOCK_MHZ > 252
@@ -105,8 +102,13 @@ int main(void) {
     sleep_ms(10);
 #endif
 
-    // Set system clock before USB init
-    set_sys_clock_khz(CPU_CLOCK_MHZ * 1000, false);
+    // Set system clock before USB init. If the target clock is not achievable,
+    // drop back to 252 MHz rather than running on at whatever clk_sys happens to
+    // be. Flash timings stay as computed for CPU_CLOCK_MHZ, which only leaves
+    // flash slower than it needs to be at 252 MHz -- never faster than its cap.
+    if (!set_sys_clock_khz(CPU_CLOCK_MHZ * 1000, false)) {
+        set_sys_clock_khz(252 * 1000, true);
+    }
 
     // Initialize stdio for USB serial console (at target clock speed)
     stdio_init_all();
