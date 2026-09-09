@@ -12,7 +12,7 @@
 
 set -e
 
-USB_HID="0"
+USB_HID="1"
 CLEAN=""
 
 # Strip special (non-positional) flags so they don't pollute the positional
