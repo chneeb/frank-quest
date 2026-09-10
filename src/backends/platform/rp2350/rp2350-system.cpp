@@ -20,7 +20,7 @@
 #include "common/config-manager.h"
 #include "audio/mixer_intern.h"
 
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
 extern "C" {
 #include "audio.h"
 }
@@ -36,7 +36,7 @@ extern "C" {
 static Audio::MixerImpl *g_mixer = nullptr;
 
 // Audio callback function called from C audio driver
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
 extern "C" void cabal_audio_set_mixer_callback(void (*callback)(uint8_t *stream, int len));
 
 static void mixer_callback_wrapper(uint8_t *stream, int len) {
@@ -70,7 +70,7 @@ OSystem_RP2350::~OSystem_RP2350() {
 	//    mixer_callback_wrapper which dereferences g_mixer; if we
 	//    delete _mixer while the IRQ is still armed the next DMA
 	//    completion dives through a freed vtable and hard-faults.
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
 	cabal_audio_set_mixer_callback(NULL);
 	cabal_audio_shutdown();
 #endif
@@ -141,7 +141,7 @@ void OSystem_RP2350::initBackend() {
 	_mixer->setReady(true);
 	g_mixer = _mixer;
 
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
 	// Initialize I2S audio driver
 	printf("OSystem_RP2350: Initializing I2S audio...\n");
 	cabal_audio_set_mixer_callback(mixer_callback_wrapper);
@@ -294,7 +294,7 @@ void OSystem_RP2350::updateScreen() {
 	if (_timerManager)
 		static_cast<DefaultTimerManager *>(_timerManager)->handler();
 
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
 	// Process audio - mix and send to I2S
 	cabal_audio_process_frame();
 #endif
@@ -409,7 +409,7 @@ uint32 OSystem_RP2350::getMillis() {
 }
 
 void OSystem_RP2350::delayMillis(uint msecs) {
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
 	// Process audio during delays to prevent underruns
 	// Call audio every ~16ms to match buffer timing (735 samples @ 44100Hz = ~16.7ms)
 	while (msecs > 0) {

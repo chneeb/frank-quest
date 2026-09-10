@@ -22,7 +22,7 @@ extern void *psram_malloc(size_t size);
 extern void psram_free(void *ptr);
 
 // External audio processing (to prevent audio freeze during file I/O)
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
 extern void cabal_audio_process_frame(void);
 #endif
 
@@ -221,7 +221,7 @@ void cabal_file_close(CabalFile *file) {
 int32_t cabal_file_read(CabalFile *file, void *buffer, uint32_t size) {
     if (!file || !file->valid || !buffer) return -1;
 
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
     // For large reads, chunk the operation and process audio between chunks
     // to prevent audio underruns during file I/O
     // Use 4KB chunks for more frequent audio processing
@@ -257,7 +257,7 @@ int32_t cabal_file_read(CabalFile *file, void *buffer, uint32_t size) {
 int32_t cabal_file_write(CabalFile *file, const void *buffer, uint32_t size) {
     if (!file || !file->valid || !buffer) return -1;
 
-#ifdef USE_I2S_AUDIO
+#ifdef CABAL_HAVE_AUDIO
     // For large writes, chunk the operation and process audio between chunks
     if (size > 4096) {
         const uint8_t *src = (const uint8_t *)buffer;

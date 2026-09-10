@@ -946,9 +946,20 @@ target_link_libraries(frank-quest
     drivers
 )
 
-# Add custom I2S audio driver
-include(${CMAKE_CURRENT_LIST_DIR}/drivers/audio/CMakeLists.txt)
-target_compile_definitions(frank-quest PRIVATE USE_I2S_AUDIO=1)
+# Audio sink, per board. Both provide the same cabal_audio_* API, so the
+# engine side does not know which one it is talking to.
+if(BOARD_VARIANT STREQUAL "PICOCALC")
+    # PicoCalc has no I2S DAC: audio is PWM on GP26/GP27 into an RC filter and
+    # the headphone/speaker switch. drivers/audio/audio.c is not built here.
+    target_sources(frank-quest PRIVATE ${CMAKE_CURRENT_LIST_DIR}/drivers/picocalc_audio.c)
+    target_include_directories(frank-quest PRIVATE ${CMAKE_CURRENT_LIST_DIR}/drivers/audio)
+    target_link_libraries(frank-quest hardware_pwm hardware_dma)
+else()
+    include(${CMAKE_CURRENT_LIST_DIR}/drivers/audio/CMakeLists.txt)
+endif()
+
+# Named for the capability, not the sink -- PicoCalc has audio but no I2S.
+target_compile_definitions(frank-quest PRIVATE CABAL_HAVE_AUDIO=1)
 
 # USB HID configuration
 if(USB_HID_ENABLED)
