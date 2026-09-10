@@ -179,20 +179,15 @@ int main(void) {
     printf("  FB0: %p  FB1: %p  (%d bytes each)\n",
            framebuffer_0, framebuffer_1, CABAL_FRAMEBUFFER_SIZE);
 
-    // Initialize the display. graphics_set_res()/graphics_set_buffer() are
-    // pure state writes and are wanted on every board; graphics_init() is the
-    // call that claims PIO/DMA and drives pins, so it stays HDMI-only. On
-    // PicoCalc there is nothing to bring up yet -- the SPI LCD driver that
-    // takes over the graphics_* API is step 2 of PICOCALC_PORT.md.
+    // Initialize the display. Which driver backs graphics_* is a build-time
+    // choice: HDMI.c on M1/M2, LCD_picocalc.c on PicoCalc (see CMakeLists).
+    // Order matters -- graphics_init() pushes the current buffer once it is
+    // up, so set the resolution and buffer first.
+    printf("Initializing display...\n");
     graphics_set_res(CABAL_SCREEN_WIDTH, CABAL_HDMI_HEIGHT);
     graphics_set_buffer(current_framebuffer);
-#ifdef BOARD_PICOCALC
-    printf("Display: none (PicoCalc LCD driver not implemented)\n");
-#else
-    printf("Initializing HDMI...\n");
     graphics_init(g_out_HDMI);
     printf("  Resolution: %dx%d\n", CABAL_SCREEN_WIDTH, CABAL_HDMI_HEIGHT);
-#endif
 
     // Set initial palette to grayscale
     for (int i = 0; i < 256; i++) {

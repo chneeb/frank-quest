@@ -128,13 +128,24 @@ if(USB_HID_ENABLED)
     add_subdirectory(drivers/usbhid)
 endif()
 
-# Create a library for core drivers
+# Create a library for core drivers. The video driver is per-board and the two
+# are mutually exclusive: both define the graphics_* API.
+if(BOARD_VARIANT STREQUAL "PICOCALC")
+    set(VIDEO_DRIVER_SOURCE drivers/LCD_picocalc.c)
+else()
+    set(VIDEO_DRIVER_SOURCE drivers/HDMI.c)
+endif()
+
 add_library(drivers
-    drivers/HDMI.c
+    ${VIDEO_DRIVER_SOURCE}
     drivers/psram_init.c
     drivers/psram_allocator.c
     drivers/dlmalloc.c
 )
+
+if(BOARD_VARIANT STREQUAL "PICOCALC")
+    pico_generate_pio_header(drivers ${CMAKE_CURRENT_LIST_DIR}/drivers/picocalc_lcd.pio)
+endif()
 target_include_directories(drivers PUBLIC
     drivers
     src

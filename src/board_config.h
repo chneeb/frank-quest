@@ -182,12 +182,10 @@ static inline uint get_psram_pin(void) {
 //=============================================================================
 #ifdef BOARD_PICOCALC
 
-// No HDMI on PicoCalc: the panel is SPI. HDMI_PIN_* are left undefined, so
-// HDMI.h falls back to its own HDMI_BASE_PIN of 6 and drivers/HDMI.c still
-// compiles. Those pins are never driven because main.c does not call
-// graphics_init() on this board -- there is no HDMI to bring up, and 6/7 are
-// the keyboard's I2C lines here. Removing HDMI.c from the build is step 2,
-// once the LCD driver provides the graphics_* API in its place.
+// No HDMI on PicoCalc: the panel is SPI, driven by drivers/LCD_picocalc.c,
+// which CMake substitutes for drivers/HDMI.c on this board. HDMI_PIN_* are
+// left undefined; HDMI.c is not compiled here, and 6/7 are the keyboard's
+// I2C lines rather than an HDMI pair.
 
 // TFT panel (ILI9488-class 320x320) on spi1
 #define LCD_SPI_PORT   spi1

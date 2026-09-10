@@ -1,0 +1,24 @@
+;
+; FRANK Quest
+;
+; Copyright (c) 2026 Mikhail Matveev <xtreme@rh1.tech>
+; https://github.com/rh1tech/frank-quest
+;
+; Derived from Cabal (https://github.com/project-cabal/cabal).
+; SPDX-License-Identifier: GPL-2.0-or-later
+;
+; Transmit-only SPI mode 0 for the PicoCalc's SPI TFT. Two instructions, so
+; one bit costs two SM cycles: SM clock = 2 x bit rate. MOSI changes while
+; SCK is low and the panel samples it on the rising edge.
+;
+; Shape follows ~/Source/shapones (samples/v3/picocalc.pio), which drives this
+; same panel at 75 MHz. That program also reads MISO; nothing here does, so
+; the input half is dropped and the SM is TX-only.
+
+.program picocalc_lcd
+.side_set 1
+
+.wrap_target
+    out pins, 1     side 0
+    nop             side 1
+.wrap
