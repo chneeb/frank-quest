@@ -1054,6 +1054,15 @@ static void registerConfManDefaults() {
 // true if the engine reported success; false means the engine refused
 // to start (bad files, unsupported variant, etc.).
 static bool dispatchGame(const QuestGame &g) {
+#ifdef BOARD_PICOCALC
+    // PicoCalc has no pointing device. Emulate one from the arrow keys for the
+    // mouse-driven engines only: AGI needs the arrows and Enter for its parser,
+    // and SCI has a keyboard cursor of its own. Pause/Break toggles at runtime.
+    cabal_set_cursor_emulation(g.engine == QuestEngine::Scumm ||
+                               g.engine == QuestEngine::Gob ||
+                               g.engine == QuestEngine::Kyra);
+#endif
+
     switch (g.engine) {
     case QuestEngine::Scumm:
         return launchScummGame(g.dirPath);

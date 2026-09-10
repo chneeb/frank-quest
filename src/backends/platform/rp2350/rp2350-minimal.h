@@ -37,6 +37,10 @@ int ps2kbd_get_key(int* pressed, unsigned char* key);
 void picocalc_kbd_init(void);
 void picocalc_kbd_tick(void);
 bool picocalc_kbd_get_event(int* pressed, int* keycode, int* ascii, int* flags);
+
+// Keyboard-driven mouse cursor. Off unless an engine asks for it; see the
+// dispatchGame() call sites and the notes in rp2350-minimal.cpp.
+void cabal_set_cursor_emulation(bool enabled);
 #endif
 
 // PS/2 Mouse declarations are in ps2.h (included when !USB_HID_ENABLED)

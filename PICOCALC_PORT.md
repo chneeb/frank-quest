@@ -3,7 +3,7 @@
 Target: run FRANK Quest on **ClockworkPi PicoCalc** with a **Pimoroni Pico Plus 2 (RP2350B)**,
 replacing HSTX HDMI with the PicoCalc's SPI TFT, I2S with PWM audio, and PS/2/USB input with the
 PicoCalc's I2C keyboard. Status: **display, keyboard, SD and audio written; AGI, SCI and SCUMM all
-run on real hardware.** Remaining: the emulated mouse cursor (§5) and dirty rects (§3).
+run on real hardware, and the emulated cursor makes SCUMM playable.** Remaining: dirty rects (§3).
 
 Confirmed working on hardware: SPI TFT, I2C keyboard, SD card and the game selector, and AGI, SCI
 and SCUMM games running. SCI in particular loads noticeably faster and plays more smoothly here than
@@ -120,7 +120,26 @@ press/hold/release over I2C — write a richer wrapper against that.
 
 Keys that must work: Esc, F1–F10 (esp. **F5** = ScummVM menu), Enter, Backspace, arrows, full ASCII.
 
-### 5. Mouse emulation (new — no upstream equivalent) — **now the only pointer**
+### 5. Mouse emulation (new — no upstream equivalent) — **done**, working on hardware
+Implemented in `rp2350-minimal.cpp` (`cursor_consume_key` / `cursor_poll_motion`), feeding the same
+event path as any other pointer, so nothing above the backend changes.
+
+Arrows move, **Enter = left button, Alt = right button**. Motion runs on a 16 ms wall-clock tick
+rather than per poll — ScummVM drains the queue each frame, so per-poll movement would tie cursor
+speed to the event-loop rate. Acceleration ramps 1 → 8 px, +1 per 120 ms held; 1 px start keeps
+clicking precise, and the ramp is what makes crossing 320 px bearable.
+
+**Enabled per engine** from `dispatchGame()`, not globally — the right answer differs by engine:
+
+| Engine | Emulation | Why |
+|---|---|---|
+| SCUMM, GOB, KYRA | on | mouse-driven, arrows mostly unused |
+| AGI | off | needs arrows *and* Enter for the parser; always-on would break it |
+| SCI | off | has its own keyboard cursor already |
+
+**Pause/Break toggles at runtime** for whatever that split gets wrong; no engine in this build binds
+that key.
+
 USB HID mouse is **parked, and cannot be the answer here.** A Pico in host mode never generates
 VBUS: there is no 5 V regulator or load switch on its USB connector, and the PicoCalc header ties
 pin 1 (`VBUS`) to the net feeding U101 pin 37, the PMIC's charging input, rather than a host-side
@@ -186,10 +205,10 @@ Point them at 16/17/18/19 in the new board block. **No driver change.**
 3. ~~SD pins~~ — **done**; CMake points `SDCARD_PIN_SPI0_*` at 16/17/18/19, no driver change,
    confirmed against the schematic
 4. ~~LCD driver, full-frame push~~ — **done** (`drivers/LCD_picocalc.c`) and **working on hardware**
-5. ~~I2C keyboard~~ — **done** (`drivers/picocalc_kbd.c`), untested on hardware
+5. ~~I2C keyboard~~ — **done** (`drivers/picocalc_kbd.c`), working on hardware
 6. Dirty-rect tracking → lower CPU and PSRAM load (no longer needed for frame rate)
-7. Mouse emulation → point-and-click games playable — **next, and required for SCUMM**
-8. ~~PWM audio~~ — **done** (`drivers/picocalc_audio.c`), untested on hardware
+7. ~~Mouse emulation~~ — **done**, working on hardware; SCUMM is playable
+8. ~~PWM audio~~ — **done** (`drivers/picocalc_audio.c`), working on hardware
 
 Steps 4 and 6 are separable on purpose: get it correct, then get it fast.
 

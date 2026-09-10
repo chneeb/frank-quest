@@ -681,6 +681,149 @@ extern "C" {
 // PS/2 event polling — also fans out to USB HID as a secondary
 // source when USB_HID_ENABLED is on, so both input paths work
 // simultaneously.
+#ifdef BOARD_PICOCALC
+//============================================================================
+// Emulated mouse cursor (PICOCALC_PORT.md step 7)
+//============================================================================
+// PicoCalc has no pointing device, and USB host is not an option on this
+// hardware (a Pico never supplies VBUS). SCUMM is unplayable without a
+// pointer, so the arrow keys drive one.
+//
+// Off by default and enabled per engine from dispatchGame(), because whether
+// this helps or hurts depends entirely on the engine:
+//
+//   SCUMM / GOB / KYRA - mouse-driven, arrows mostly unused: emulate.
+//   AGI                - keyboard-native, needs arrows and Enter for the
+//                        parser; emulating would break a working engine.
+//   SCI                - already has its own keyboard cursor, which is why
+//                        SCI plays acceptably here with no mouse at all.
+//
+// Pause/Break toggles it at runtime for the cases this guess gets wrong; no
+// engine in this build binds that key.
+
+#define CURSOR_DIR_UP    0x01
+#define CURSOR_DIR_DOWN  0x02
+#define CURSOR_DIR_LEFT  0x04
+#define CURSOR_DIR_RIGHT 0x08
+
+// 60 Hz motion, independent of how often the engine polls -- otherwise the
+// cursor speed would track the event-loop rate rather than wall clock.
+#define CURSOR_TICK_US       16000
+// Ramp: +1 px per tick for every 120 ms held, to a cap. Starting at 1 px keeps
+// it precise for clicking; without the ramp, crossing 320 px takes forever.
+#define CURSOR_ACCEL_STEP_US 120000
+#define CURSOR_MAX_STEP      8
+
+static bool cursor_emu_enabled = false;
+static uint8_t cursor_dirs = 0;
+static uint32_t cursor_tick_last_us = 0;
+static uint32_t cursor_held_since_us = 0;
+
+extern "C" void cabal_set_cursor_emulation(bool enabled) {
+    cursor_emu_enabled = enabled;
+    cursor_dirs = 0;
+}
+
+static inline uint8_t cursor_dir_bit(int keycode) {
+    switch (keycode) {
+    case CABAL_KEY_UP:    return CURSOR_DIR_UP;
+    case CABAL_KEY_DOWN:  return CURSOR_DIR_DOWN;
+    case CABAL_KEY_LEFT:  return CURSOR_DIR_LEFT;
+    case CABAL_KEY_RIGHT: return CURSOR_DIR_RIGHT;
+    default:              return 0;
+    }
+}
+
+// Returns true if the key was consumed by cursor emulation. When it also
+// produced an event (a click), *emitted is set and `event` is filled in.
+static bool cursor_consume_key(CabalEvent *event, int keycode, int pressed,
+                               bool *emitted) {
+    *emitted = false;
+
+    // Pause/Break toggles, on press only, and is always consumed.
+    if (keycode == 19 /* CABAL_KEY_PAUSE */) {
+        if (pressed) {
+            cursor_emu_enabled = !cursor_emu_enabled;
+            cursor_dirs = 0;
+            printf("PicoCalc: cursor emulation %s\n",
+                   cursor_emu_enabled ? "on" : "off");
+        }
+        return true;
+    }
+
+    if (!cursor_emu_enabled) return false;
+
+    uint8_t bit = cursor_dir_bit(keycode);
+    if (bit) {
+        if (pressed) {
+            // First arrow down starts the acceleration clock; further arrows
+            // join the existing ramp rather than resetting it.
+            if (cursor_dirs == 0) {
+                cursor_held_since_us = time_us_32();
+                cursor_tick_last_us = 0;  // move on the next poll
+            }
+            cursor_dirs |= bit;
+        } else {
+            cursor_dirs &= (uint8_t)~bit;
+        }
+        return true;
+    }
+
+    // Enter = left button, Alt = right button.
+    int button = 0;
+    if (keycode == CABAL_KEY_RETURN) button = 1;
+    else if (keycode == 307 /* CABAL_KEY_LALT */) button = 2;
+    if (!button) return false;
+
+    if (button == 1) {
+        event->type = pressed ? CABAL_EVENT_LBUTTONDOWN : CABAL_EVENT_LBUTTONUP;
+        g_state.prevMouseButtons = pressed ? (g_state.prevMouseButtons | 1)
+                                           : (g_state.prevMouseButtons & ~1);
+    } else {
+        event->type = pressed ? CABAL_EVENT_RBUTTONDOWN : CABAL_EVENT_RBUTTONUP;
+        g_state.prevMouseButtons = pressed ? (g_state.prevMouseButtons | 2)
+                                           : (g_state.prevMouseButtons & ~2);
+    }
+    event->mouse.x = g_state.mouseX;
+    event->mouse.y = g_state.mouseY;
+    *emitted = true;
+    return true;
+}
+
+// Advance the cursor if arrows are held and a tick is due. Returns true if it
+// produced a motion event.
+static bool cursor_poll_motion(CabalEvent *event) {
+    if (!cursor_emu_enabled || cursor_dirs == 0) return false;
+
+    const uint32_t now = time_us_32();
+    if (cursor_tick_last_us != 0 && (now - cursor_tick_last_us) < CURSOR_TICK_US) {
+        return false;
+    }
+    cursor_tick_last_us = now;
+
+    int step = 1 + (int)((now - cursor_held_since_us) / CURSOR_ACCEL_STEP_US);
+    if (step > CURSOR_MAX_STEP) step = CURSOR_MAX_STEP;
+
+    if (cursor_dirs & CURSOR_DIR_LEFT)  g_state.mouseX -= step;
+    if (cursor_dirs & CURSOR_DIR_RIGHT) g_state.mouseX += step;
+    if (cursor_dirs & CURSOR_DIR_UP)    g_state.mouseY -= step;
+    if (cursor_dirs & CURSOR_DIR_DOWN)  g_state.mouseY += step;
+
+    if (g_state.mouseX < 0) g_state.mouseX = 0;
+    if (g_state.mouseX >= g_state.screenWidth)  g_state.mouseX = g_state.screenWidth - 1;
+    if (g_state.mouseY < 0) g_state.mouseY = 0;
+    if (g_state.mouseY >= g_state.screenHeight) g_state.mouseY = g_state.screenHeight - 1;
+
+    g_state.cursorX = g_state.mouseX;
+    g_state.cursorY = g_state.mouseY;
+
+    event->type = CABAL_EVENT_MOUSEMOVE;
+    event->mouse.x = g_state.mouseX;
+    event->mouse.y = g_state.mouseY;
+    return true;
+}
+#endif // BOARD_PICOCALC
+
 bool cabal_poll_event(CabalEvent *event) {
     static uint32_t total_poll_time = 0;
     static uint32_t total_mouse_time = 0;
@@ -697,9 +840,18 @@ bool cabal_poll_event(CabalEvent *event) {
     picocalc_kbd_tick();
     {
         int pc_pressed, pc_keycode, pc_ascii, pc_flags;
-        if (picocalc_kbd_get_event(&pc_pressed, &pc_keycode, &pc_ascii, &pc_flags)) {
+        // Drain rather than handling one per call: a key the cursor swallows
+        // produces no event, and returning false there would make the engine
+        // stop polling with input still queued.
+        while (picocalc_kbd_get_event(&pc_pressed, &pc_keycode, &pc_ascii, &pc_flags)) {
             // Ctrl+Alt+Del -> reboot to selector. Never returns on match.
             fq_check_ctrl_alt_del(pc_keycode, pc_pressed);
+
+            bool emitted = false;
+            if (cursor_consume_key(event, pc_keycode, pc_pressed, &emitted)) {
+                if (emitted) return true;
+                continue;  // arrow state change or a toggle: no event
+            }
 
             event->type = pc_pressed ? CABAL_EVENT_KEYDOWN : CABAL_EVENT_KEYUP;
             event->kbd.keycode = pc_keycode;
@@ -707,6 +859,8 @@ bool cabal_poll_event(CabalEvent *event) {
             event->kbd.flags = pc_flags;
             return true;
         }
+
+        if (cursor_poll_motion(event)) return true;
     }
 #endif
     ps2kbd_tick();
