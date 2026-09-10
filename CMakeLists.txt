@@ -871,8 +871,9 @@ elseif(BOARD_VARIANT STREQUAL "PICOCALC")
         # driver is step 6 of PICOCALC_PORT.md. Until then the I2S driver is
         # still linked and initialised, so park it on pins that are free on
         # this board rather than letting it default onto 26/27 or the TFT.
+        # 20/21 avoided: shapones declares PIN_RAM_CS=20 on the LCD's SPI bus.
         PICO_AUDIO_I2S_DATA_PIN=8
-        PICO_AUDIO_I2S_CLOCK_PIN_BASE=20
+        PICO_AUDIO_I2S_CLOCK_PIN_BASE=2
         # SD Card (spi0)
         SDCARD_PIN_SPI0_CS=17
         SDCARD_PIN_SPI0_SCK=18

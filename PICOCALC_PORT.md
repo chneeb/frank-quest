@@ -2,12 +2,16 @@
 
 Target: run FRANK Quest on **ClockworkPi PicoCalc** with a **Pimoroni Pico Plus 2 (RP2350B)**,
 replacing HSTX HDMI with the PicoCalc's SPI TFT, I2S with PWM audio, and PS/2/USB input with the
-PicoCalc's I2C keyboard. Status: **not started — this is the spec, nothing below is implemented.**
+PicoCalc's I2C keyboard. Status: **board variant done (`./build.sh PICOCALC` links); no PicoCalc
+peripheral driver written yet.**
 
-Reference implementation for all three PicoCalc peripherals: `~/Source/freesci-archive`
-(`src/platform/pico/hw/lcdspi/`, `src/platform/pico/hw/i2ckbd/`, `src/platform/pico/hw_config.c`).
-Those files are vendorable more or less as-is for the LCD and SD; the keyboard wrapper is not
-(see "Keyboard" below).
+Two reference implementations, and they disagree in ways that matter:
+
+- `~/Source/shapones` (`samples/v3/picocalc.{cpp,hpp,pio}`) — **the better source for the display.**
+  PIO SPI (2 instructions, side-set SCK) + DMA at **75 MHz**, 16-bit colour. Proven on hardware.
+- `~/Source/freesci-archive` (`src/platform/pico/hw/lcdspi/`, `.../hw/i2ckbd/`, `hw_config.c`) —
+  hardware SPI at 25 MHz. Still the reference for the **I2C keyboard** and SD; for the LCD, prefer
+  shapones. The keyboard wrapper is not vendorable as-is (see "Keyboard" below).
 
 ## Why this port is a good fit
 
@@ -32,7 +36,11 @@ Pimoroni Pico Plus 2 in the PicoCalc's Pico bay. PSRAM is on-package (QMI CS1, G
 | Keyboard (STM32 MCU, addr `0x1F`) | i2c1 | SDA 6, SCL 7 |
 | SD card | spi0 | MISO 16, CS 17, SCK 18, MOSI 19 (exact hardware-SPI0 function pins) |
 | Audio | PWM | 26 (L), 27 (R) |
-| Free | — | 0,1 (UART console), 2–5, 8, 9, 20–22, 28 |
+| Free | — | 0,1 (UART console), 2–5, 8, 9, 21, 22, 28 |
+
+`shapones` declares `PIN_RAM_CS = 20` (`samples/v3/picocalc.hpp:19`) — a second device sharing the
+LCD's SPI bus. Unconfirmed whether that is the PicoCalc itself or a shapones-specific add-on, so
+**treat GPIO 20 as taken until checked.**
 
 HSTX/DVI is unused on PicoCalc, which frees **PIO0** and **DMA_IRQ_0**.
 
@@ -61,10 +69,20 @@ above the driver changes. Vendor `lcdspi.c` for init/`define_region_spi`/`hw_sen
   `psram_get_framebuffer_back()`). Do **not** DMA the panel directly from PSRAM. Convert
   8bpp palette → RGB into a small ping-pong **SRAM line buffer** and DMA that. `320 × 3 = 960 B`
   per line buffer.
-- Panel is `0x3A = 0x66` → **18-bit, 3 bytes/pixel** over SPI (`lcdspi.c:592`).
-  Full frame = 320×200×3 = **192 KB ≈ 31 ms @ 50 MHz SPI**.
-  → **Spike first: try `0x3A = 0x55` (16-bit).** The ILI9488 datasheet says SPI is 18-bit only, but
-  this panel is ST7365P-class and some PicoCalc firmwares push RGB565. If it takes, bandwidth halves.
+- **Pixel format: settled — use `0x3A = 0x65`, 16-bit, 2 bytes/pixel.** shapones runs exactly this
+  on hardware (`picocalc.cpp:208`, commented `0x65=16 bit colour for SPI,0x66=18bits`). `0x3A`
+  splits into DPI (bits 6:4) and DBI (bits 2:0); `0x65` leaves the RGB side 18-bit and sets the
+  SPI/MCU side to 16-bit, which is the half that matters. The ILI9488 datasheet's "SPI is 18-bit
+  only" does not hold for this ST7365P-class panel. freesci's `0x66` (3 bytes/pixel) is simply
+  leaving half the bandwidth on the table.
+- **SPI clock: 75 MHz is proven**, not the 50 MHz originally assumed here and not freesci's 25.
+  shapones drives the panel from a **2-instruction PIO SPI program plus DMA**, not hardware SPI
+  (`picocalc.pio`, `setup_pio()`), at `SYS_CLK_FREQ / 4` with `SYS_CLK_FREQ = 300 MHz`. Note the
+  divisor is relative to the system clock: at FRANK Quest's 504 MHz, `/4` would be 126 MHz, so pick
+  the divisor for a *target frequency* (504 / 2 / 75 ≈ 3.36) rather than copying `/4`.
+- Full frame at that config = 320×200×2 = **128 KB ≈ 14 ms @ 75 MHz → ~73 fps**, before any
+  dirty-rect work. **The panel is not the bottleneck.** Dirty rects (§3) remain worth doing for
+  the engine-side and PSRAM-read savings, but they are no longer load-bearing for playability.
 - Blit 1:1 at `y+60` (320×200 centred in 320×320). No scaling — it costs bandwidth and looks worse.
 - Run the SPI push from **core 1** so it overlaps the engine on core 0.
 
@@ -116,12 +134,13 @@ Point them at 16/17/18/19 in the new board block. **No driver change.**
 
 ## Suggested order
 
-1. `0x3A = 0x55` spike (30 min) — decides the display budget
-2. Board variant block + build plumbing, boot to UART console at 504 MHz
+1. ~~`0x3A` spike~~ — **answered from shapones without hardware: `0x65`, 16-bit, 75 MHz.**
+2. ~~Board variant block + build plumbing~~ — **done**; `./build.sh PICOCALC` configures and links,
+   HDMI and PS/2 are compiled out, boots to UART console. Not yet run on hardware.
 3. SD pins → game selector reachable
-4. LCD driver, full-frame push (slow but correct) → picture on screen
+4. LCD driver, full-frame push (correct first) → picture on screen
 5. I2C keyboard → menus and AGI/parser games playable
-6. Dirty-rect tracking → usable frame rate
+6. Dirty-rect tracking → lower CPU and PSRAM load (no longer needed for frame rate)
 7. Mouse emulation → point-and-click games playable
 8. PWM audio
 
@@ -129,9 +148,11 @@ Steps 4 and 6 are separable on purpose: get it correct, then get it fast.
 
 ## Open questions
 
-- Does `0x3A = 0x55` (RGB565) work on this panel? Decides everything about display feel.
-- Max stable SPI clock for the panel (freesci runs 25 MHz; 50 MHz is commented out in `lcdspi.h`).
-- 504 MHz stability with SPI DMA + I2C live.
+- ~~Does RGB565 work on this panel?~~ **Yes — `0x3A = 0x65`, proven in shapones.**
+- ~~Max stable SPI clock?~~ **75 MHz proven in shapones** (PIO + DMA). Whether it goes higher is
+  untested and not worth chasing: 75 MHz already yields ~73 fps full-frame.
+- 504 MHz stability with SPI DMA + I2C live. shapones runs 300 MHz, so this is still ours to prove.
+- Is GPIO 20 (`PIN_RAM_CS` in shapones) claimed on a stock PicoCalc, or is that an add-on?
 - RP2350 E9 / GPIO pull-down erratum on the I2C keyboard lines — did freesci need anything special?
 - Physical fit of the Pico Plus 2 in the bay (see above).
 
