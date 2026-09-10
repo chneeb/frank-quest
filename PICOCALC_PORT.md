@@ -7,9 +7,13 @@ run on real hardware, and the emulated cursor makes SCUMM playable.** Remaining:
 
 Confirmed working on hardware: SPI TFT, I2C keyboard, SD card and the game selector, and AGI, SCI
 and SCUMM games running. SCI in particular loads noticeably faster and plays more smoothly here than
-in `~/Source/freesci-archive` on the same hardware — worth measuring rather than assuming, but the
-likely causes are PSRAM on the QMI bus at 133 MHz versus freesci's PIO SPI PSRAM, and 504 MHz versus
-its 300. PWM audio works too (checked in Space Quest 3).
+in `~/Source/freesci-archive` on the same hardware. Now checked, and it is **not** PSRAM — both use
+memory-mapped QMI. freesci never overclocks at all (`set_sys_clock_khz(133000, true)`,
+`src/platform/pico/pico_main.c:166`), so it runs at the RP2350 default: **3.8× less core clock**. Its
+panel adds ~4.5× on top, at 25 MHz hardware SPI and `0x3A = 0x66` (3 bytes/pixel) against our 75 MHz
+PIO+DMA at 16-bit. Written up for that project in
+`~/Source/freesci-archive/PICO_PERFORMANCE_VS_FRANK_QUEST.md`.
+PWM audio works too (checked in Space Quest 3).
 
 Two reference implementations, and they disagree in ways that matter:
 
