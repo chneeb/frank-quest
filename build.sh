@@ -15,6 +15,10 @@ set -e
 
 USB_HID="1"
 CLEAN=""
+# Optional engines, all on unless 'lean' is passed.
+ENGINE_GOB="ON"
+ENGINE_KYRA="ON"
+ENGINE_SCUMM_7_8="ON"
 
 # Strip special (non-positional) flags so they don't pollute the positional
 # slots for BOARD/CPU/PSRAM/FLASH.
@@ -23,6 +27,10 @@ for arg in "$@"; do
     case "$arg" in
         clean) CLEAN="clean" ;;
         usb-hid|usbhid) USB_HID="1" ;;
+        lean) ENGINE_GOB="OFF"; ENGINE_KYRA="OFF"; ENGINE_SCUMM_7_8="OFF" ;;
+        no-gob) ENGINE_GOB="OFF" ;;
+        no-kyra) ENGINE_KYRA="OFF" ;;
+        no-scumm7) ENGINE_SCUMM_7_8="OFF" ;;
         *) POS+=("$arg") ;;
     esac
 done
@@ -46,6 +54,8 @@ if [[ "$BOARD" != "M1" && "$BOARD" != "M2" && "$BOARD" != "PICOCALC" ]]; then
     echo "  PSRAM_MHZ: 84, 100, 133, 166  (default: 133)"
     echo "  FLASH_MHZ: flash QMI cap in MHz  (default: 66)"
     echo "  usb-hid:   Enable USB keyboard/mouse (disables USB serial, uses UART)"
+    echo "  lean:      Drop GOB, KYRA and SCUMM v7/v8 (much faster builds)"
+    echo "             or drop them one at a time: no-gob, no-kyra, no-scumm7"
     exit 1
 fi
 
@@ -65,6 +75,7 @@ if [[ "$BOARD" == "PICOCALC" ]]; then
 else
     echo "  Audio: I2S"
 fi
+echo "  Engines: AGI SCI SCUMM + GOB=$ENGINE_GOB KYRA=$ENGINE_KYRA SCUMM_7_8=$ENGINE_SCUMM_7_8"
 echo ""
 
 # Clean if requested
@@ -84,6 +95,9 @@ cmake -DPICO_PLATFORM=rp2350 \
       -DPSRAM_SPEED="$PSRAM" \
       -DFLASH_SPEED="$FLASH" \
       -DUSB_HID_ENABLED="$USB_HID" \
+      -DENGINE_GOB="$ENGINE_GOB" \
+      -DENGINE_KYRA="$ENGINE_KYRA" \
+      -DENGINE_SCUMM_7_8="$ENGINE_SCUMM_7_8" \
       ..
 
 # Build

@@ -21,6 +21,13 @@ endif()
 # USB HID disabled by default (use USB serial console for debug)
 option(USB_HID_ENABLED "Enable USB HID for keyboard/mouse" OFF)
 
+# Optional engines. All ON by default -- turning one off drops its sources and
+# its ENABLE_* define, which is what the engine code guards on. Useful to cut
+# build time while working on the platform rather than the engines.
+option(ENGINE_GOB "Build the GOB engine (Gobliins)" ON)
+option(ENGINE_KYRA "Build the KYRA engine (Legend of Kyrandia)" ON)
+option(ENGINE_SCUMM_7_8 "Build SCUMM v7/v8 (Full Throttle, The Dig, COMI)" ON)
+
 # CPU overclock configuration (252, 378, 504 MHz)
 # 252 = no overclock (default), 378 = medium, 504 = high
 set(CPU_SPEED "252" CACHE STRING "CPU clock in MHz: 252, 378, 504")
@@ -48,6 +55,8 @@ message(STATUS "  PSRAM: ${PSRAM_SPEED} MHz")
 message(STATUS "  Flash: ${FLASH_SPEED} MHz")
 message(STATUS "  Voltage: ${CPU_VOLTAGE}")
 message(STATUS "  USB HID: ${USB_HID_ENABLED}")
+message(STATUS "  Engines: AGI SCI SCUMM (always) "
+               "+ GOB=${ENGINE_GOB} KYRA=${ENGINE_KYRA} SCUMM_7_8=${ENGINE_SCUMM_7_8}")
 
 # Disable SDK's new/delete overrides - we provide our own for PSRAM
 set(PICO_CXX_DISABLE_ALLOCATION_OVERRIDES 1)
@@ -644,7 +653,6 @@ set(SCUMM_ENGINE_SOURCES
     src/engines/scumm/help.cpp
     src/engines/scumm/input.cpp
     src/engines/scumm/midiparser_ro.cpp
-    src/engines/scumm/nut_renderer.cpp
     src/engines/scumm/object.cpp
     src/engines/scumm/palette.cpp
     src/engines/scumm/resource.cpp
@@ -715,6 +723,9 @@ set(SCUMM_ENGINE_SOURCES
 # SCUMM v7/v8 sources (Full Throttle, The Dig, COMI)
 set(SCUMM_7_8_SOURCES
     src/engines/scumm/script_v8.cpp
+    # nut_renderer.h is itself behind ENABLE_SCUMM_7_8, so this cannot live in
+    # the base SCUMM list -- matches upstream's module.mk.
+    src/engines/scumm/nut_renderer.cpp
     # iMUSE Digital (v7/v8 audio)
     src/engines/scumm/imuse_digi/dimuse.cpp
     src/engines/scumm/imuse_digi/dimuse_bndmgr.cpp
@@ -741,6 +752,19 @@ set(SCUMM_7_8_SOURCES
     src/engines/scumm/insane/insane_iact.cpp
     src/engines/scumm/insane/insane_scenes.cpp
 )
+
+# Drop the sources for any engine that is switched off. The matching ENABLE_*
+# define is dropped further down; both are needed, since the engine code is
+# guarded by the define and the plugin table registers on it.
+if(NOT ENGINE_GOB)
+    set(GOB_ENGINE_SOURCES "")
+endif()
+if(NOT ENGINE_KYRA)
+    set(KYRA_ENGINE_SOURCES "")
+endif()
+if(NOT ENGINE_SCUMM_7_8)
+    set(SCUMM_7_8_SOURCES "")
+endif()
 
 # ScummVM Backends
 set(BACKEND_SOURCES
@@ -826,13 +850,10 @@ target_compile_definitions(frank-quest PRIVATE
     PICO_AUDIO_I2S_STATE_MACHINE=2
     PICO_AUDIO_I2S_DMA_IRQ=1
 
-    # Game engines to enable
+    # Game engines to enable. The optional ones are appended below.
     ENABLE_AGI=1          # Sierra AGI games
-    ENABLE_GOB=1          # Gobliins games
     ENABLE_SCI=1          # Sierra SCI0/SCI1/SCI1.1 games (no SCI32)
-    ENABLE_KYRA=1         # Legend of Kyrandia games
     ENABLE_SCUMM=1        # LucasArts SCUMM v0-v6 (MI1/MI2/DOTT/Sam&Max/FOA/LOOM/etc)
-    ENABLE_SCUMM_7_8=1    # SCUMM v7 (Full Throttle); v8 not tested
 
     # Memory optimization flags
     CABAL_LOW_MEMORY=1
@@ -853,6 +874,19 @@ target_compile_definitions(frank-quest PRIVATE
     # Use minimal audio for embedded (only PC speaker/PCjr)
     CABAL_MINIMAL_AUDIO=1
 )
+
+# Optional engines. The define is what the engine code and the plugin table
+# (src/engines/plugins_table.h) guard on; the sources are dropped separately
+# above. Both have to go, or the link fails on registered-but-absent plugins.
+if(ENGINE_GOB)
+    target_compile_definitions(frank-quest PRIVATE ENABLE_GOB=1)
+endif()
+if(ENGINE_KYRA)
+    target_compile_definitions(frank-quest PRIVATE ENABLE_KYRA=1)
+endif()
+if(ENGINE_SCUMM_7_8)
+    target_compile_definitions(frank-quest PRIVATE ENABLE_SCUMM_7_8=1)
+endif()
 
 # Set peripheral pins based on board variant
 if(BOARD_VARIANT STREQUAL "M1")
