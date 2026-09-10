@@ -145,6 +145,7 @@ add_library(drivers
 
 if(BOARD_VARIANT STREQUAL "PICOCALC")
     pico_generate_pio_header(drivers ${CMAKE_CURRENT_LIST_DIR}/drivers/picocalc_lcd.pio)
+    target_sources(drivers PRIVATE drivers/picocalc_kbd.c)
 endif()
 target_include_directories(drivers PUBLIC
     drivers
@@ -167,7 +168,7 @@ target_compile_definitions(drivers PRIVATE
 # diagnostic survives the expected trap that follows.
 set_source_files_properties(drivers/dlmalloc.c PROPERTIES COMPILE_DEFINITIONS
     "ONLY_MSPACES=1;HAVE_MMAP=0;HAVE_MORECORE=0;NO_MALLOC_STATS=1;USE_LOCKS=0;ABORT_ON_ASSERT_FAILURE=0;MALLOC_FAILURE_ACTION=;LACKS_SYS_MMAN_H=1;LACKS_UNISTD_H=1;LACKS_SYS_PARAM_H=1;FOOTERS=1;PROCEED_ON_ERROR=0;MALLOC_INSPECT_ALL=1")
-target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi)
+target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi hardware_i2c)
 
 # ScummVM Common library
 set(COMMON_SOURCES

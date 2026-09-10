@@ -31,6 +31,14 @@ void ps2kbd_init(void);
 void ps2kbd_tick(void);
 int ps2kbd_get_key(int* pressed, unsigned char* key);
 
+#ifdef BOARD_PICOCALC
+// PicoCalc I2C keyboard (drivers/picocalc_kbd.c). Replaces PS/2 on that
+// board; the two are never both present.
+void picocalc_kbd_init(void);
+void picocalc_kbd_tick(void);
+bool picocalc_kbd_get_event(int* pressed, int* keycode, int* ascii, int* flags);
+#endif
+
 // PS/2 Mouse declarations are in ps2.h (included when !USB_HID_ENABLED)
 
 // HDMI Graphics

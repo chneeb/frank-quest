@@ -232,10 +232,11 @@ void cabal_system_init(void) {
     g_state.startTime = time_us_32();
 
 #ifdef BOARD_PICOCALC
-    // No PS/2 on PicoCalc: the keyboard is an I2C MCU (driver not written yet,
-    // see PICOCALC_PORT.md step 4) and there is no pointing device at all.
-    // Until then USB HID is the only input path on this board.
-    printf("  PS/2 skipped (PicoCalc: I2C keyboard, no PS/2)\n");
+    // No PS/2 on PicoCalc: the keyboard is an I2C MCU and there is no pointing
+    // device at all. USB HID still layers on top for an external keyboard or
+    // mouse; a keyboard-driven cursor is PICOCALC_PORT.md step 7.
+    printf("  Initializing PicoCalc keyboard (i2c1)...\n");
+    picocalc_kbd_init();
 #else
     // PS/2 keyboard / mouse always run — they sit on dedicated PIO
     // state machines (pio0 for kbd, pio1 for mouse) and don't share
@@ -689,6 +690,25 @@ bool cabal_poll_event(CabalEvent *event) {
     uint32_t start = time_us_32();
 
     // Poll keyboard
+#ifdef BOARD_PICOCALC
+    // The PicoCalc's keyboard already reports in the CABAL_KEY_* space with
+    // live modifier state, so it needs none of the HID-code translation the
+    // PS/2 path below does.
+    picocalc_kbd_tick();
+    {
+        int pc_pressed, pc_keycode, pc_ascii, pc_flags;
+        if (picocalc_kbd_get_event(&pc_pressed, &pc_keycode, &pc_ascii, &pc_flags)) {
+            // Ctrl+Alt+Del -> reboot to selector. Never returns on match.
+            fq_check_ctrl_alt_del(pc_keycode, pc_pressed);
+
+            event->type = pc_pressed ? CABAL_EVENT_KEYDOWN : CABAL_EVENT_KEYUP;
+            event->kbd.keycode = pc_keycode;
+            event->kbd.ascii = pc_ascii;
+            event->kbd.flags = pc_flags;
+            return true;
+        }
+    }
+#endif
     ps2kbd_tick();
 
     // Check for keyboard events. Use the extended API so we get the
