@@ -9,7 +9,7 @@ Confirmed working on hardware: SPI TFT, I2C keyboard, SD card and the game selec
 and SCUMM games running. SCI in particular loads noticeably faster and plays more smoothly here than
 in `~/Source/freesci-archive` on the same hardware — worth measuring rather than assuming, but the
 likely causes are PSRAM on the QMI bus at 133 MHz versus freesci's PIO SPI PSRAM, and 504 MHz versus
-its 300. Not yet verified: PWM audio (written, never heard).
+its 300. PWM audio works too (checked in Space Quest 3).
 
 Two reference implementations, and they disagree in ways that matter:
 
@@ -159,7 +159,8 @@ only ~16 dB. The carrier therefore runs at **88.2 kHz** (each mixer sample emitt
 more, which is free at this clock: 10-bit at 88.2 kHz is a clkdiv of ~5.6 at 504 MHz. That same
 7.2 kHz corner also rolls off the top of the audio band, and nothing can be done about that.
 
-Untested on hardware.
+Confirmed working on hardware (Space Quest 3). The 88.2 kHz carrier choice has not been A/B'd
+against 44.1 kHz by ear -- if carrier whine ever shows up, that is the first knob.
 
 ### 6b. Game directory naming — AGI needs `quest/agi`
 `src/frank_quest_selector.cpp` matches the **exact** directory name against `kDetectors` (case
