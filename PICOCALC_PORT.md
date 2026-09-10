@@ -2,8 +2,14 @@
 
 Target: run FRANK Quest on **ClockworkPi PicoCalc** with a **Pimoroni Pico Plus 2 (RP2350B)**,
 replacing HSTX HDMI with the PicoCalc's SPI TFT, I2S with PWM audio, and PS/2/USB input with the
-PicoCalc's I2C keyboard. Status: **board variant done (`./build.sh PICOCALC` links); no PicoCalc
-peripheral driver written yet.**
+PicoCalc's I2C keyboard. Status: **display, keyboard, SD and audio written; AGI, SCI and SCUMM all
+run on real hardware.** Remaining: the emulated mouse cursor (§5) and dirty rects (§3).
+
+Confirmed working on hardware: SPI TFT, I2C keyboard, SD card and the game selector, and AGI, SCI
+and SCUMM games running. SCI in particular loads noticeably faster and plays more smoothly here than
+in `~/Source/freesci-archive` on the same hardware — worth measuring rather than assuming, but the
+likely causes are PSRAM on the QMI bus at 133 MHz versus freesci's PIO SPI PSRAM, and 504 MHz versus
+its 300. Not yet verified: PWM audio (written, never heard).
 
 Two reference implementations, and they disagree in ways that matter:
 
@@ -36,17 +42,21 @@ Pimoroni Pico Plus 2 in the PicoCalc's Pico bay. PSRAM is on-package (QMI CS1, G
 | Keyboard (STM32 MCU, addr `0x1F`) | i2c1 | SDA 6, SCL 7 |
 | SD card | spi0 | MISO 16, CS 17, SCK 18, MOSI 19 (exact hardware-SPI0 function pins) |
 | Audio | PWM | 26 (L), 27 (R) |
-| Free | — | 0,1 (UART console), 2–5, 8, 9, 21, 22, 28 |
+| SPI RAM | shared with TFT | CS 20, SCK 21 |
+| SD card detect | — | 22 |
+| Free | — | 0,1 (UART console), 2–5, 8, 9, 28 |
 
-`shapones` declares `PIN_RAM_CS = 20` (`samples/v3/picocalc.hpp:19`) — a second device sharing the
-LCD's SPI bus. Unconfirmed whether that is the PicoCalc itself or a shapones-specific add-on, so
-**treat GPIO 20 as taken until checked.**
+Pin map confirmed against the mainboard schematic (`~/Source/PicoCalc/clockwork_Mainboard_V2.0_
+Schematic.pdf`), header table: `SPI0_RX/CS/SCK/TX` = GP16/17/18/19, `RAM_CS` = GP20, `RAM_SCK` =
+GP21, `SD_DET` = GP22, `PWM_L` = GP26, `PWM_R` = GP27. **GPIO 20/21/22 are stock PicoCalc, not an
+add-on** — shapones' `PIN_RAM_CS = 20` was right. `SD_DET` on GP22 is a card-detect line nothing
+currently uses.
 
 HSTX/DVI is unused on PicoCalc, which frees **PIO0** and **DMA_IRQ_0**.
 
 ### Physical checks before committing
 - Does the Pico Plus 2's USB-C and Qwiic/JST-SH connector clear the PicoCalc's Pico bay?
-- Does the case cutout allow an OTG adapter, if USB HID mouse support is kept?
+- ~~Does the case cutout allow an OTG adapter?~~ Moot — USB host is parked, see §5.
 
 ## Work items
 
@@ -110,7 +120,17 @@ press/hold/release over I2C — write a richer wrapper against that.
 
 Keys that must work: Esc, F1–F10 (esp. **F5** = ScummVM menu), Enter, Backspace, arrows, full ASCII.
 
-### 5. Mouse emulation (new — no upstream equivalent)
+### 5. Mouse emulation (new — no upstream equivalent) — **now the only pointer**
+USB HID mouse is **parked, and cannot be the answer here.** A Pico in host mode never generates
+VBUS: there is no 5 V regulator or load switch on its USB connector, and the PicoCalc header ties
+pin 1 (`VBUS`) to the net feeding U101 pin 37, the PMIC's charging input, rather than a host-side
+supply. A bus-powered mouse plugged into the Pico's port therefore gets no power. A powered OTG hub
+would work, and defeats the point on a handheld. Verified on hardware: USB mouse does nothing in
+SCUMM or SCI on a `usb-hid` build with the HID stack confirmed present in the image.
+
+SCUMM is effectively unplayable without a pointer, so this step is now load-bearing rather than a
+nicety. SCI plays acceptably keyboard-only; AGI is keyboard-native.
+
 PicoCalc has no pointing device. Build a keyboard-driven cursor that synthesizes mouse events into
 the same `cabal_event_t` queue that `warpMouse()` already drives:
 - arrows move; **hold-to-accelerate** (start ~1 px/tick, ramp to ~8) — without accel it is unusable
@@ -120,13 +140,38 @@ the same `cabal_event_t` queue that `warpMouse()` already drives:
 Scope note: **AGI is fully keyboard-driven** and SCUMM v1–v4 are workable, so a keyboard-only build
 already covers a real slice of the library. Point-and-click titles need the emulated cursor.
 
-### 6. Audio — PWM on GPIO 26/27
-Keep the whole ping-pong DMA / pre-roll / IRQ-rearm scaffold in `drivers/audio.c`; replace only the
-sink: PIO I2S → two PWM slices fed by a **DMA-timer-paced** channel at the mixer rate, 8→10-bit
-conversion. Mono-summing to one channel is acceptable if DMA channels get tight.
+### 6. Audio — PWM on GPIO 26/27 — **done** (`drivers/picocalc_audio.c`)
+Provides the same `cabal_audio_*` API as `drivers/audio/audio.c`, which is not compiled on this
+board. The engine side is untouched: still 44100 Hz 16-bit stereo from the mixer, still one
+`cabal_audio_process_frame()` per frame.
 
-Easier than the equivalent frank-snes swap (a ScummVM mixer callback tolerates far more latency than
-an emulated APU), and core 1 gets its HDMI-encoding budget back, which pays for iMUSE/SMUSH/MIDI.
+Schematic (V2.0) settles two things the plan had guessed at:
+
+- **Stereo is real.** GP26 (`PWM_L`) and GP27 (`PWM_R`) each go through U501 (NC7WZ16 dual buffer)
+  and an identical filter chain to `PCM_AUDIO_L`/`R`, then the SW501 headphone jack with `HP_DET`
+  switching to the speaker. No mono-summing needed — shapones' mono output is its own choice.
+- **One DMA channel drives both.** GP26/GP27 are channels A and B of the *same* PWM slice, and a
+  slice's CC register packs both levels into one 32-bit word. Given the LCD already holds a channel,
+  this matters.
+
+The filter is a single pole at **~7.2 kHz** (220R/100nF), which suppresses a 44.1 kHz carrier by
+only ~16 dB. The carrier therefore runs at **88.2 kHz** (each mixer sample emitted twice) for ~6 dB
+more, which is free at this clock: 10-bit at 88.2 kHz is a clkdiv of ~5.6 at 504 MHz. That same
+7.2 kHz corner also rolls off the top of the audio band, and nothing can be done about that.
+
+Untested on hardware.
+
+### 6b. Game directory naming — AGI needs `quest/agi`
+`src/frank_quest_selector.cpp` matches the **exact** directory name against `kDetectors` (case
+insensitive, no prefix or content fallback), and the only row mapping to `QuestEngine::Agi` is
+literally `agi`. Several AGI-era Sierra titles — `kq1`, `kq4`, `lsl1`, `sq1`, `pq1` — are hardcoded
+to `QuestEngine::Sci`, since each name covers both an original AGI release and a later SCI remake.
+An AGI game in a directory named after the game is therefore dispatched to the SCI launcher and
+fails. Put it in `quest/agi/` — which also means only one AGI game at a time.
+
+Worth fixing at the source: the detector table already supports a `probeFile`, so a `kq1` row could
+probe for `logdir` and route to AGI, falling through to the SCI row otherwise. Nothing uses that for
+these ambiguous names yet.
 
 ### 7. SD card
 `drivers/sdcard/sdcard.h` pins are all `#ifndef`-overridable and the bus already defaults to `spi0`.
@@ -137,12 +182,13 @@ Point them at 16/17/18/19 in the new board block. **No driver change.**
 1. ~~`0x3A` spike~~ — **answered from shapones without hardware: `0x65`, 16-bit, 75 MHz.**
 2. ~~Board variant block + build plumbing~~ — **done**; `./build.sh PICOCALC` configures and links,
    HDMI and PS/2 are compiled out, boots to UART console. Not yet run on hardware.
-3. SD pins → game selector reachable
-4. LCD driver, full-frame push (correct first) → picture on screen
-5. I2C keyboard → menus and AGI/parser games playable
+3. ~~SD pins~~ — **done**; CMake points `SDCARD_PIN_SPI0_*` at 16/17/18/19, no driver change,
+   confirmed against the schematic
+4. ~~LCD driver, full-frame push~~ — **done** (`drivers/LCD_picocalc.c`) and **working on hardware**
+5. ~~I2C keyboard~~ — **done** (`drivers/picocalc_kbd.c`), untested on hardware
 6. Dirty-rect tracking → lower CPU and PSRAM load (no longer needed for frame rate)
-7. Mouse emulation → point-and-click games playable
-8. PWM audio
+7. Mouse emulation → point-and-click games playable — **next, and required for SCUMM**
+8. ~~PWM audio~~ — **done** (`drivers/picocalc_audio.c`), untested on hardware
 
 Steps 4 and 6 are separable on purpose: get it correct, then get it fast.
 
@@ -152,7 +198,8 @@ Steps 4 and 6 are separable on purpose: get it correct, then get it fast.
 - ~~Max stable SPI clock?~~ **75 MHz proven in shapones** (PIO + DMA). Whether it goes higher is
   untested and not worth chasing: 75 MHz already yields ~73 fps full-frame.
 - 504 MHz stability with SPI DMA + I2C live. shapones runs 300 MHz, so this is still ours to prove.
-- Is GPIO 20 (`PIN_RAM_CS` in shapones) claimed on a stock PicoCalc, or is that an add-on?
+- ~~Is GPIO 20 claimed on a stock PicoCalc?~~ **Yes — `RAM_CS`, per the schematic. So are GP21
+  (`RAM_SCK`) and GP22 (`SD_DET`).**
 - RP2350 E9 / GPIO pull-down erratum on the I2C keyboard lines — did freesci need anything special?
 - Physical fit of the Pico Plus 2 in the bay (see above).
 

@@ -8,9 +8,19 @@ Engines: AGI, SCI, SCUMM v1–v7, GOB, KYRA.
 
 ```bash
 export PICO_SDK_PATH=/home/chneeb/Source/pico-sdk
-./build.sh [M1|M2] [CPU_MHZ] [PSRAM_MHZ] [FLASH_MHZ] [usb-hid] [clean]
+./build.sh [M1|M2|PICOCALC] [CPU_MHZ] [PSRAM_MHZ] [FLASH_MHZ] [usb-hid|cdc] [clean]
 # Defaults: M2 504 133 66
 ```
+
+`build.sh` builds **AGI, SCI and SCUMM v1–v6 only**. GOB, KYRA and SCUMM v7/v8 are CMake options
+(`ENGINE_GOB`, `ENGINE_KYRA`, `ENGINE_SCUMM_7_8`) that default **OFF**, because they are the largest
+engines in the tree and most work here is on the platform. `release.sh` passes all three `ON`
+explicitly, so released firmware still ships the engine list the README advertises — anything else
+that configures a release image has to do the same.
+
+`cdc` puts the console on USB serial instead of building USB HID input. On PicoCalc that costs
+nothing but an external USB keyboard/mouse, since the built-in keyboard is I2C; on M1/M2 it costs
+you USB HID entirely. Otherwise the console is UART on GP0/GP1.
 
 Flash with `./flash.sh` or drag-and-drop in BOOTSEL mode.
 
@@ -23,8 +33,14 @@ through `build.sh`.
 |---------|----------|
 | M2 | FRANK / Murmulator 2.0 (default) |
 | M1 | Murmulator 1.x |
+| PICOCALC | ClockworkPi PicoCalc + Pimoroni Pico Plus 2 (`M4` is accepted as an alias) |
 
 All GPIO assignments live in `src/board_config.h`.
+
+PicoCalc swaps three drivers and drops two. HDMI → `drivers/LCD_picocalc.c` (SPI TFT) and I2S →
+`drivers/picocalc_audio.c` (PWM), both selected in `CMakeLists.txt` so the `graphics_*` and
+`cabal_audio_*` APIs above them are unchanged; PS/2 keyboard and mouse are compiled out in favour of
+`drivers/picocalc_kbd.c` (I2C). See [PICOCALC_PORT.md](PICOCALC_PORT.md).
 
 ## Overclocking
 
@@ -63,5 +79,10 @@ per-frame.
 
 ## In-flight work
 
-- [PicoCalc port plan](PICOCALC_PORT.md) — spec for running on ClockworkPi PicoCalc hardware
-  (SPI TFT + I2C keyboard + PWM audio). Not started; read before touching drivers for that target.
+- [PicoCalc port](PICOCALC_PORT.md) — display, keyboard, SD and audio are written; AGI, SCI and
+  SCUMM all run on real hardware. What is left is the emulated mouse cursor (SCUMM is unplayable
+  without a pointer) and dirty-rect tracking. Read it before touching drivers for that target.
+- **USB host on PicoCalc is parked.** A Pico never supplies VBUS in host mode, and the PicoCalc's
+  header ties pin 1 to the PMIC's charging input rather than a host-side 5 V rail, so a bus-powered
+  USB mouse gets no power. A powered hub would work but defeats the point on a handheld. The
+  emulated cursor is the answer instead.
