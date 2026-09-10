@@ -21,12 +21,17 @@ endif()
 # USB HID disabled by default (use USB serial console for debug)
 option(USB_HID_ENABLED "Enable USB HID for keyboard/mouse" OFF)
 
-# Optional engines. All ON by default -- turning one off drops its sources and
-# its ENABLE_* define, which is what the engine code guards on. Useful to cut
-# build time while working on the platform rather than the engines.
-option(ENGINE_GOB "Build the GOB engine (Gobliins)" ON)
-option(ENGINE_KYRA "Build the KYRA engine (Legend of Kyrandia)" ON)
-option(ENGINE_SCUMM_7_8 "Build SCUMM v7/v8 (Full Throttle, The Dig, COMI)" ON)
+# Optional engines. OFF by default: they are the largest engines in the tree
+# and most day-to-day work is on the platform, not on them. Turning one on
+# restores its sources and its ENABLE_* define, which is what the engine code
+# and the plugin table guard on.
+#
+# release.sh switches all three back ON explicitly -- released firmware ships
+# the full engine list the README advertises. Anything building a release
+# image without going through release.sh has to do the same.
+option(ENGINE_GOB "Build the GOB engine (Gobliins)" OFF)
+option(ENGINE_KYRA "Build the KYRA engine (Legend of Kyrandia)" OFF)
+option(ENGINE_SCUMM_7_8 "Build SCUMM v7/v8 (Full Throttle, The Dig, COMI)" OFF)
 
 # CPU overclock configuration (252, 378, 504 MHz)
 # 252 = no overclock (default), 378 = medium, 504 = high

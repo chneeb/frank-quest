@@ -142,7 +142,10 @@ for ENTRY in "${BUILD_MATRIX[@]}"; do
         -DCPU_SPEED="$RELEASE_CPU_SPEED" \
         -DPSRAM_SPEED="$RELEASE_PSRAM_SPEED" \
         -DFLASH_SPEED="$RELEASE_FLASH_SPEED" \
-        -DUSB_HID_ENABLED=ON > "$LOG_PATH" 2>&1; then
+        -DUSB_HID_ENABLED=ON \
+        -DENGINE_GOB=ON \
+        -DENGINE_KYRA=ON \
+        -DENGINE_SCUMM_7_8=ON > "$LOG_PATH" 2>&1; then
 
         if make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) >> "$LOG_PATH" 2>&1; then
             if [[ -f "frank-quest.uf2" ]]; then
