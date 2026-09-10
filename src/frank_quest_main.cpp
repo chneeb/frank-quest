@@ -32,21 +32,28 @@ extern "C" {
 #include "common/archive.h"
 
 // GOB Engine includes
+#ifdef ENABLE_GOB
 #include "gob/gob.h"
+#endif
 
 // Kyrandia Engine includes
+#ifdef ENABLE_KYRA
 #include "kyra/kyra_lok.h"
 #include "kyra/kyra_hof.h"
+#endif
 
 // SCI Engine includes
 #include "sci/sci.h"
 
-// SCUMM Engine includes (v1-v6 only — v7/v8 disabled, Full Throttle/Dig/COMI not built)
+// SCUMM Engine includes. scumm_v7.h is itself behind ENABLE_SCUMM_7_8, so it
+// must not be included when v7/v8 is switched off.
 #include "scumm/scumm.h"
 #include "scumm/scumm_v4.h"
 #include "scumm/scumm_v5.h"
 #include "scumm/scumm_v6.h"
+#ifdef ENABLE_SCUMM_7_8
 #include "scumm/scumm_v7.h"
+#endif
 #include "scumm/detection.h"
 
 // Forward declare AGIGameDescription since it's defined in detection.cpp
@@ -61,6 +68,7 @@ struct AGIGameDescription {
 }
 
 // Forward declare GOBGameDescription
+#ifdef ENABLE_GOB
 namespace Gob {
 struct GOBGameDescription {
     ADGameDescription desc;
@@ -71,12 +79,15 @@ struct GOBGameDescription {
     uint32 demoIndex;
 };
 }
+#endif
 
 // Forward declare KYRAGameDescription
+#ifdef ENABLE_KYRA
 struct KYRAGameDescription {
     ADGameDescription desc;
     Kyra::GameFlags flags;
 };
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -236,6 +247,7 @@ static int detectGOBVersion(const char *gamePath) {
 }
 
 // Forward declaration
+#ifdef ENABLE_GOB
 static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion);
 
 // GOB (Gobliins) game launcher with auto-detection
@@ -372,6 +384,7 @@ static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion) {
     delete engine;
     return (err.getCode() == Common::kNoError);
 }
+#endif // ENABLE_GOB
 
 // AGI game launcher
 // Returns true if a game was found and launched
@@ -573,6 +586,7 @@ extern "C" void cabal_init(void) {
 
 // Kyrandia game launcher
 // gameId: 0 = Kyrandia 1 (Legend of Kyrandia), 1 = Kyrandia 2 (Hand of Fate).
+#ifdef ENABLE_KYRA
 static bool launchKyrandiaGame(const char *gamePath, int gameId) {
     printf("KYRA: Launching %s from %s\n",
            gameId == 1 ? "Kyrandia 2 (Hand of Fate)" : "Kyrandia 1 (Legend of Kyrandia)",
@@ -641,6 +655,7 @@ static bool launchKyrandiaGame(const char *gamePath, int gameId) {
     delete engine;
     return (err.getCode() == Common::kNoError);
 }
+#endif // ENABLE_KYRA
 
 // Full Throttle (SCUMM v7) launcher temporarily disabled.
 
@@ -979,9 +994,14 @@ static bool launchScummGame(const char *gamePath) {
         engine = new Scumm::ScummEngine_v6(g_system, dr);
         break;
     case 7:
+#ifdef ENABLE_SCUMM_7_8
         printf("SCUMM: Creating v7 engine...\n");
         engine = new Scumm::ScummEngine_v7(g_system, dr);
         break;
+#else
+        printf("SCUMM: v7 not built into this firmware\n");
+        return false;
+#endif
     default:
         printf("SCUMM: unsupported version %d\n", info->version);
         return false;
@@ -1042,10 +1062,20 @@ static bool dispatchGame(const QuestGame &g) {
         // NULL so detectSciGameId() runs against the directory name.
         return launchSciGame(g.dirPath, nullptr);
     case QuestEngine::Kyra:
+#ifdef ENABLE_KYRA
         return launchKyrandiaGame(g.dirPath, (int)g.engineSubtype);
+#else
+        printf("KYRA: engine not built into this firmware\n");
+        return false;
+#endif
     case QuestEngine::Gob:
+#ifdef ENABLE_GOB
         if (g.engineSubtype == 0) return launchGOBGame(g.dirPath);
         return launchGOBGameWithVersion(g.dirPath, (int)g.engineSubtype);
+#else
+        printf("GOB: engine not built into this firmware\n");
+        return false;
+#endif
     case QuestEngine::Agi:
         return launchAGIGame(g.dirPath);
     }
