@@ -761,6 +761,7 @@ bool cabal_poll_event(CabalEvent *event) {
         return true;
     }
 
+#ifndef BOARD_PICOCALC
     // Get mouse state (Core 1 handles polling in background - this is non-blocking)
     int16_t dx = 0, dy = 0;
     int8_t wheel = 0;
@@ -846,6 +847,13 @@ bool cabal_poll_event(CabalEvent *event) {
             return true;
         }
     }
+#else
+    // No PS/2 mouse on PicoCalc, and ps2_mouse_get_state() is not a no-op when
+    // the driver was never initialised: it polls a PIO FIFO that was never set
+    // up and toggles a PIO IRQ every call, in the hot event loop. USB HID (when
+    // built in) is the only pointing device here until the emulated cursor of
+    // PICOCALC_PORT.md step 7 exists.
+#endif
 
 #ifdef USB_HID_ENABLED
     // Nothing on PS/2 — try USB HID as the secondary source so
