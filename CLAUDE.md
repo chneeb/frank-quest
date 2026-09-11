@@ -82,6 +82,10 @@ per-frame.
 - [PicoCalc port](PICOCALC_PORT.md) — display, keyboard, SD and audio are written; AGI, SCI and
   SCUMM all run on real hardware. What is left is the emulated mouse cursor (SCUMM is unplayable
   without a pointer) and dirty-rect tracking. Read it before touching drivers for that target.
+- [Save / restore](SAVELOAD.md) — investigated, not implemented. SCI saves silently into slot 0
+  because Cabal's `GUI::SaveLoadChooser` is a stub that hardcodes it; SCUMM reaches no dialog at all
+  because `openMainMenuDialog()` is an early return under `DISABLE_GUI`. One real chooser wired at
+  those two points fixes every engine. Save domains are per-engine, not per-game, and collide.
 - **USB host on PicoCalc is parked.** A Pico never supplies VBUS in host mode, and the PicoCalc's
   header ties pin 1 to the PMIC's charging input rather than a host-side 5 V rail, so a bus-powered
   USB mouse gets no power. A powered hub would work but defeats the point on a handheld. The
