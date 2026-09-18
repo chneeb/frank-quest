@@ -77,6 +77,34 @@ is code to write, not to backport.
 Framebuffers are **PSRAM-resident** (`src/main.c:169-170`) — relevant to any driver that reads them
 per-frame.
 
+## Memory model — mapped PSRAM is a hard requirement
+
+PSRAM is **memory-mapped** QMI at `0x11000000`, and `cabal_enable_psram_heap()` routes every
+`malloc`/`new` into a dlmalloc mspace there. Engine code then dereferences those pointers directly.
+Two consequences, both load-bearing:
+
+**PIO SPI PSRAM cannot substitute for QMI here.** PIO PSRAM is not mapped; it is a block device
+reached through explicit calls. Sibling projects that use it can, because they have a chokepoint
+this project does not:
+
+- `~/Source/freesci-archive` calls `psram_read(&g_psram, addr, dst, chunk)` (`psram_alloc.c:62`) and
+  hand-places each large buffer. It carries a separate `PICO_PSRAM_MAPPED` mode for QMI parts.
+- `~/Source/pico-286` funnels every *guest* memory access through `read8psram()` / `write8psram()`
+  (`emulator.h:319-335`, from `memory.c:222/309`), with an optional swap/paging layer (`swap.h`)
+  underneath. A CPU emulator interposes on memory anyway, so the indirection is already paid for.
+
+What lives in PSRAM here is the C++ heap, dereferenced at thousands of sites across the engines.
+There is no accessor to redirect. Adopting the PIO model would mean either rewriting those accesses
+or demand-paging under a mapped window — and a heap of small pointer-chased objects is close to the
+worst case for paging, unlike pico-286's contiguous, local guest RAM.
+
+**SRAM-only is not viable either.** freesci's `PICO_SQ3_SRAM_CEILING_ASSESSMENT.md` concludes that
+SQ3 *alone*, without sound, only "probably" fits after extensive optimisation, in a dedicated SCI
+interpreter. This build spends ~302 KB of the 520 KB on code/BSS/DMA before any game data, and
+budgets a 3.5 MB game zone plus 512 KB scratch in PSRAM.
+
+So a plain Pico 2 without mapped PSRAM needs a new memory architecture, not a recompile.
+
 ## In-flight work
 
 - [PicoCalc port](PICOCALC_PORT.md) — display, keyboard, SD and audio are written; AGI, SCI and
